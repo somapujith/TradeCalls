@@ -1,13 +1,28 @@
 fastapi==0.115.6
+starlette>=0.40,<0.42
 uvicorn[standard]==0.34.0
 apscheduler==3.11.0
-pydantic==2.10.4
-pydantic-settings==2.7.1
+# pydantic/pydantic-settings pinned as a matched trio — pydantic 2.10.4 + pydantic-settings 2.7.1/2.15.0
+# both hit a broken `_lenient_issubclass` import at runtime (verified 2026-08-16); this trio is confirmed working.
+pydantic==2.9.2
+pydantic-core==2.23.4
+pydantic-settings==2.6.1
 sqlalchemy==2.0.36
 psycopg2-binary==2.9.10
 pandas==2.2.3
-pandas-ta==0.3.14b0
+# pandas-ta==0.3.14b0 pinned in docs but not resolvable via pip's index on Python 3.11
+# (0.4.x requires >=3.12, 0.3.14b0 absent from live PyPI index as of 2026-08-16).
+# Indicators (market/indicators.py) implemented with plain pandas/numpy instead — no functional loss, revisit if pandas-ta becomes installable.
 yfinance==0.2.51
 pytest==8.3.4
+pytest-cov==6.0.0
 python-dotenv==1.0.1
-neo_api_client @ git+https://github.com/Kotak-Neo/kotak-neo-api.git#egg=neo_api_client
+alembic==1.13.3
+
+# Kotak Neo SDK — pinned repo unreachable (404) as of 2026-08-16.
+# Client code has an in-repo stub fallback until this resolves; see app/data/kotak_neo_client.py.
+# neo_api_client @ git+https://github.com/Kotak-Neo/kotak-neo-api.git#egg=neo_api_client
+
+# News collection module (app/news/) — free-tier APIs + HTML/RSS scraping, standalone (not wired into scoring)
+requests==2.34.2
+beautifulsoup4==4.15.0
