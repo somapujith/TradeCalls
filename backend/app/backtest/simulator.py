@@ -431,15 +431,20 @@ def _record_confirmed_trade(
     full_history: pd.DataFrame,
     trade_rows: list[dict],
 ) -> None:
-    targets = engine_result.targets or {}
+    planned_targets = engine_result.targets or {}
     fill_outcome = _fill_and_track(
         signal_date=signal_date,
         full_history=full_history,
         entry_price=engine_result.entry_price,
         stop_loss=engine_result.stop_loss,
-        targets=targets,
+        targets=planned_targets,
         atr_on_signal_date=atr_on_signal_date,
     )
+    # Targets actually tracked against outcome resolution — rebased to the
+    # real fill price by _fill_and_track when a fill occurred (see
+    # _rebase_targets_to_fill), otherwise the original signal-time plan
+    # (no fill means no rebasing reference point).
+    recorded_targets = fill_outcome["targets"]
 
     regime_label = regime.value if hasattr(regime, "value") else str(regime)
 
@@ -452,11 +457,11 @@ def _record_confirmed_trade(
             "entry_date": fill_outcome["entry_date"],
             "entry_price": fill_outcome["entry_price"],
             "stop_loss": engine_result.stop_loss,
-            "target_1r": targets.get("target_1r"),
-            "target_1_5r": targets.get("target_1_5r"),
-            "target_2r": targets.get("target_2r"),
-            "target_3r": targets.get("target_3r"),
-            "nearest_structural_target": targets.get("nearest_structural_target"),
+            "target_1r": recorded_targets.get("target_1r"),
+            "target_1_5r": recorded_targets.get("target_1_5r"),
+            "target_2r": recorded_targets.get("target_2r"),
+            "target_3r": recorded_targets.get("target_3r"),
+            "nearest_structural_target": recorded_targets.get("nearest_structural_target"),
             "score": score_result.total,
             "tier": score_result.tier,
             "sector": sector,
@@ -472,6 +477,32 @@ def _record_confirmed_trade(
             "pnl": fill_outcome["pnl"],
         }
     )
+
+
+def _rebase_targets_to_fill(planned_targets: dict, planned_entry: float, fill_price: float, stop_loss: float) -> dict:
+    """Re-anchor the R-multiple target ladder to the actual fill price.
+
+    engine_result.targets is computed at signal time against the *planned*
+    entry (breakout level / reversal close + ATR buffer). The real fill can
+    land meaningfully away from that plan — a gap-up open, slippage — and
+    since stop_loss is structural and does NOT move with the fill, reusing
+    the planned R-multiples verbatim can put a "target" below the actual
+    entry once the fill price has moved past where the plan assumed it
+    would. Re-deriving 1R/1.5R/2R/3R off (fill_price, stop_loss) keeps the
+    risk multiple meaning intact; nearest_structural_target is left as-is
+    since it's anchored to resistance/support structure, not to entry price,
+    and doesn't need to move with a modest fill-price difference.
+    """
+    if planned_entry <= 0 or fill_price == planned_entry:
+        return planned_targets
+    risk = fill_price - stop_loss
+    return {
+        "target_1r": fill_price + 1.0 * risk,
+        "target_1_5r": fill_price + 1.5 * risk,
+        "target_2r": fill_price + 2.0 * risk,
+        "target_3r": fill_price + 3.0 * risk,
+        "nearest_structural_target": planned_targets.get("nearest_structural_target"),
+    }
 
 
 def _fill_and_track(
@@ -491,10 +522,14 @@ def _fill_and_track(
     this is the backtest replaying realized history forward from a fixed
     decision point, not the state machine peeking ahead to make that
     decision in the first place.
+
+    Returns the fill-rebased targets dict too (key "targets"), so the caller
+    persists the ladder that was actually tracked against, not the stale
+    signal-time plan.
     """
     future = full_history[full_history.index.date > signal_date]
     if future.empty:
-        return _no_fill_result(exit_reason="SESSION_END", exit_date=None)
+        return _no_fill_result(exit_reason="SESSION_END", exit_date=None, targets=targets)
 
     next_bar = future.iloc[0]
     planned_entry = float(entry_price) if entry_price is not None else float(next_bar["open"])
@@ -508,15 +543,16 @@ def _fill_and_track(
     )
 
     if not fill.filled:
-        return _no_fill_result(exit_reason=fill.reason or "INVALIDATED_GAP", exit_date=_as_date(future.index[0]))
+        return _no_fill_result(exit_reason=fill.reason or "INVALIDATED_GAP", exit_date=_as_date(future.index[0]), targets=targets)
 
     entry_date = _as_date(future.index[0])
     bars_after_entry = future.iloc[1:]
+    rebased_targets = _rebase_targets_to_fill(targets, planned_entry, float(fill.fill_price), float(stop_loss))
     outcome = track_trade_outcome(
         entry_date=entry_date,
         entry_price=float(fill.fill_price),
         stop_loss=float(stop_loss),
-        targets=targets,
+        targets=rebased_targets,
         bars_after_entry=bars_after_entry,
     )
 
@@ -539,10 +575,11 @@ def _fill_and_track(
         "mae": outcome.mae,
         "holding_days": outcome.holding_days,
         "pnl": pnl,
+        "targets": rebased_targets,
     }
 
 
-def _no_fill_result(*, exit_reason: str, exit_date: date | None) -> dict:
+def _no_fill_result(*, exit_reason: str, exit_date: date | None, targets: dict) -> dict:
     return {
         "entry_date": None,
         "entry_price": None,
@@ -555,6 +592,7 @@ def _no_fill_result(*, exit_reason: str, exit_date: date | None) -> dict:
         "mae": None,
         "holding_days": None,
         "pnl": None,
+        "targets": targets,
     }
 
 

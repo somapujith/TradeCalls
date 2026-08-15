@@ -9,31 +9,32 @@ days 1..N-1 as running it over days 1..N-1 alone. If that test ever fails,
 the simulator has a look-ahead bug — full stop, regardless of what anything
 else says.
 
-NOTE on setup_type used for the "reaches CONFIRMED" scenarios: this suite
-uses a hand-constructed DIP_BUY scenario (not BREAKOUT) as the "clear signal
-produces a CONFIRMED trade_setup with sane entry/SL/targets" test, because
-app.breakout.breakout_engine._nearest_resistance (owned by a different,
-concurrently-edited module — not in this file's scope) only ever returns
-candidate resistance levels with `price >= close`, while advance_breakout_
-state's APPROACHING -> BREAKOUT_ATTEMPT transition requires `close >
-target.price` against that same target. Those two conditions are mutually
-exclusive by construction, which makes APPROACHING -> BREAKOUT_ATTEMPT
-structurally unreachable through the public resistance_clusters() API as it
-stands today (independently confirmed by 3 pre-existing failures in
-tests/test_breakout_engine.py at the time this file was written). The
-dip-buy engine's equivalent (_nearest_support, approached from above) does
-not have this issue, so it is used here to exercise the full CONFIRMED path
-end-to-end. The breakout path is still covered by this file's negative
-controls (no false positives) and by feeding the engine bar histories that
-exercise every breakout state reachable today.
+NOTE on setup_type used for the "reaches CONFIRMED" scenarios: this suite's
+primary hand-constructed CONFIRMED walkthrough uses a DIP_BUY scenario
+(_dip_buy_scenario), but a hand-constructed BREAKOUT scenario
+(_breakout_scenario, see TestBreakoutConfirmedEndToEnd) exercises the same
+full WATCH -> APPROACHING -> BREAKOUT_ATTEMPT -> CANDLE_CONFIRMATION ->
+VOLUME_CONFIRMATION -> CONFIRMED path end-to-end through run_backtest.
+app.breakout.breakout_engine now splits resistance lookup into
+_resistance_target_above (price >= close, used only by WATCH) and
+_resistance_being_tested (nearest by absolute distance, used from
+APPROACHING onward) specifically so a close that has moved above a level
+doesn't lose that level for the CLOSE_ABOVE_RESISTANCE / candle / volume
+checks that follow — this resolved an earlier structural block where
+APPROACHING -> BREAKOUT_ATTEMPT was unreachable through the public
+resistance_clusters() API. TestBreakoutRecordingLogic still separately
+monkeypatches advance_breakout_state for a few orchestration-only cases
+(scoring wiring, terminal-state short-circuiting) where driving the real
+engine end-to-end would just add noise to what's actually under test.
 """
 from __future__ import annotations
 
 from datetime import date, timedelta
 
 import pandas as pd
+import pytest
 
-from app.backtest.simulator import run_backtest
+from app.backtest.simulator import _indicator_value, _reversal_pattern, run_backtest, run_backtest_and_persist
 
 STRATEGY_VERSION = "abc1234"
 
@@ -65,6 +66,74 @@ def _touch_low(rows: list[dict], low_price: float, flank_price: float) -> None:
     rows.append({"open": flank_price, "high": flank_price, "low": low_price, "close": low_price + 0.2, "volume": 100_000})
     for _ in range(3):
         rows.append({"open": flank_price, "high": flank_price + 0.3, "low": flank_price - 0.1, "close": flank_price + 0.1, "volume": 100_000})
+
+
+def _touch_high(rows: list[dict], high_price: float, flank_price: float) -> None:
+    """Mirror of _touch_low for resistance: 3 flanking bars + 1 high bar + 3
+    flanking bars, all below high_price, so the high bar is recognized as a
+    genuine SWING_HIGH by market/levels.py's fractal lookback=3 rule. Two
+    calls at the same high_price (see _breakout_scenario) form a real
+    RESISTANCE_CLUSTER (min_touches=2) rather than an isolated swing high.
+    """
+    for _ in range(3):
+        rows.append({"open": flank_price, "high": flank_price + 0.1, "low": flank_price - 0.3, "close": flank_price - 0.1, "volume": 100_000})
+    rows.append({"open": flank_price, "high": high_price, "low": flank_price - 0.2, "close": high_price - 0.2, "volume": 100_000})
+    for _ in range(3):
+        rows.append({"open": flank_price, "high": flank_price + 0.1, "low": flank_price - 0.3, "close": flank_price - 0.1, "volume": 100_000})
+
+
+def _breakout_scenario(start: date) -> pd.DataFrame:
+    """Hand-constructed: a steady uptrend (60 bars) that touches a real
+    resistance level (128.0) twice to form a genuine RESISTANCE_CLUSTER,
+    consolidates just under it (within APPROACH_PROXIMITY_PCT), then a
+    strong-bodied candle closes decisively above it on rising volume,
+    followed by a high-RVOL confirmation bar — walking WATCH ->
+    APPROACHING -> BREAKOUT_ATTEMPT -> CANDLE_CONFIRMATION ->
+    VOLUME_CONFIRMATION -> CONFIRMED end-to-end through the real
+    (unmocked) advance_breakout_state, driven only by bar history exactly
+    as run_backtest itself computes resistance_clusters/support_clusters
+    per day. Bar-by-bar transitions were verified by direct engine
+    inspection before being encoded here (see TestBreakoutConfirmedEndToEnd).
+    """
+    rows: list[dict] = []
+    price = 100.0
+    for _ in range(60):
+        price += 0.3
+        rows.append({"open": price - 0.1, "high": price + 0.2, "low": price - 0.2, "close": price, "volume": 100_000})
+
+    resistance_level = 128.0
+    _touch_high(rows, resistance_level, 126.0)
+    _touch_high(rows, resistance_level, 125.0)
+
+    # Consolidate within 2% below resistance: WATCH -> APPROACHING.
+    approach_price = resistance_level * 0.985
+    for _ in range(3):
+        rows.append({"open": approach_price, "high": approach_price + 0.2, "low": approach_price - 0.2, "close": approach_price, "volume": 100_000})
+
+    # APPROACHING -> BREAKOUT_ATTEMPT: close decisively above resistance.
+    rows.append({"open": approach_price, "high": resistance_level + 1.5, "low": approach_price - 0.1, "close": resistance_level + 1.2, "volume": 110_000})
+    # BREAKOUT_ATTEMPT -> CANDLE_CONFIRMATION: strong body, low upper wick,
+    # closes further above resistance on elevated volume.
+    rows.append({"open": resistance_level + 1.2, "high": resistance_level + 3.0, "low": resistance_level + 1.0, "close": resistance_level + 2.8, "volume": 400_000})
+    # CANDLE_CONFIRMATION -> VOLUME_CONFIRMATION: RVOL >= 1.5 against the
+    # trailing-20 baseline (which by now includes the prior 400k-volume bar).
+    rows.append({"open": resistance_level + 2.8, "high": resistance_level + 3.5, "low": resistance_level + 2.5, "close": resistance_level + 3.2, "volume": 900_000})
+    # VOLUME_CONFIRMATION -> CONFIRMED: unconditional on the next call.
+    rows.append({"open": resistance_level + 3.2, "high": resistance_level + 3.8, "low": resistance_level + 3.0, "close": resistance_level + 3.5, "volume": 200_000})
+
+    # Fill day (T+1 after CONFIRMED): open stays modest/near the planned
+    # entry (atr_entry_buffer just above resistance_level) rather than
+    # gapping far above it, so attempt_entry_fill's fill_price lands close
+    # to planned_entry — a huge gap-up here would fill above target_1r
+    # (computed from the CONFIRMED-time planned entry/stop), producing a
+    # target ladder that's already "behind" the fill, which is a real and
+    # correctly-modeled edge case but not what this scenario is for.
+    rows.append({"open": resistance_level + 0.5, "high": resistance_level + 1.5, "low": resistance_level + 0.2, "close": resistance_level + 1.0, "volume": 130_000})
+    # Favorable follow-through so outcome tracking has room to resolve.
+    for _ in range(6):
+        rows.append({"open": resistance_level + 1.0, "high": resistance_level + 2.5, "low": resistance_level + 0.5, "close": resistance_level + 2.0, "volume": 120_000})
+
+    return _make_bars(rows, start)
 
 
 def _dip_buy_scenario(start: date) -> pd.DataFrame:
@@ -109,6 +178,43 @@ def _dip_buy_scenario(start: date) -> pd.DataFrame:
     # Favorable follow-through so outcome tracking has room to resolve.
     for _ in range(6):
         rows.append({"open": 118.0, "high": 122.0, "low": 117.5, "close": 121.0, "volume": 120_000})
+
+    return _make_bars(rows, start)
+
+
+def _dip_buy_scenario_with_target_hit(start: date) -> pd.DataFrame:
+    """Same CONFIRMED path as _dip_buy_scenario, but with a modest fill-day
+    bar followed by a decisive breakout bar that clears target_1r within the
+    tracked window — exercises the pnl-computation branch of _fill_and_track
+    (outcome.exit_price is not None), which the base scenario's SESSION_END
+    ending never reaches.
+    """
+    rows: list[dict] = []
+    price = 100.0
+    for _ in range(60):
+        price += 0.3
+        rows.append({"open": price - 0.1, "high": price + 0.2, "low": price - 0.2, "close": price, "volume": 100_000})
+
+    support_level = 116.0
+    _touch_low(rows, support_level, 118.0)
+    _touch_low(rows, support_level, 119.0)
+
+    for _ in range(5):
+        price += 0.4
+        rows.append({"open": price - 0.1, "high": price + 0.2, "low": price - 0.2, "close": price, "volume": 100_000})
+
+    rows.append({"open": price, "high": price, "low": price - 1.0, "close": price - 1.5, "volume": 90_000})
+    rows.append({"open": price - 1.5, "high": price - 1.5, "low": support_level + 0.8, "close": support_level + 1.2, "volume": 90_000})
+    rows.append({"open": support_level + 1.2, "high": support_level + 1.5, "low": support_level + 0.2, "close": support_level + 0.5, "volume": 90_000})
+    rows.append({"open": support_level + 0.3, "high": support_level + 0.6, "low": support_level - 1.0, "close": support_level + 0.4, "volume": 400_000})
+    rows.append({"open": support_level + 0.4, "high": support_level + 1.0, "low": support_level + 0.2, "close": support_level + 0.8, "volume": 200_000})
+
+    # Fill day: modest range around the prior close, entry fills normally.
+    rows.append({"open": 117.0, "high": 117.5, "low": 116.8, "close": 117.2, "volume": 120_000})
+    # Decisive follow-through bar clearing target_1r intrabar.
+    rows.append({"open": 117.2, "high": 200.0, "low": 117.0, "close": 180.0, "volume": 130_000})
+    for _ in range(3):
+        rows.append({"open": 180.0, "high": 181.0, "low": 179.0, "close": 180.0, "volume": 100_000})
 
     return _make_bars(rows, start)
 
@@ -407,6 +513,36 @@ class TestEntryFillsOnTPlusOne:
         assert pd.isna(row["entry_price"]) or row["entry_price"] is None
 
 
+class TestOutcomeTrackingAndPnl:
+    def test_target_hit_resolves_with_positive_pnl(self):
+        """When a filled trade's forward bars clear a target level,
+        _fill_and_track must compute a real pnl (sell - buy - costs), not
+        leave it None — None is only correct for still-open/unresolved
+        trades (SESSION_END with no exit_price).
+        """
+        start = date(2024, 1, 1)
+        bars = _dip_buy_scenario_with_target_hit(start)
+        nifty = _nifty_close(len(bars) + 5, start)
+
+        trades = run_backtest(
+            bars_by_symbol={"AAA": bars},
+            strategy_version=STRATEGY_VERSION,
+            start_date=start,
+            end_date=bars.index[-1].date(),
+            nifty_close=nifty,
+        )
+
+        dip_buy_trades = trades[trades["setup_type"] == "DIP_BUY"]
+        assert len(dip_buy_trades) == 1
+        row = dip_buy_trades.iloc[0]
+
+        assert row["exit_reason"] == "TARGET_HIT"
+        assert row["exit_price"] is not None
+        assert row["pnl"] is not None
+        assert row["pnl"] > 0
+        assert row["exit_price"] > row["entry_price"]
+
+
 class TestBothSetupTypesRunIndependently:
     def test_symbol_can_be_in_non_terminal_state_for_both_setups_simultaneously(self):
         """A symbol progressing through the dip-buy state chain is
@@ -604,14 +740,15 @@ class TestOptionalMarketRegimeInputs:
 
 
 class TestBreakoutRecordingLogic:
-    """The breakout engine's own APPROACHING -> BREAKOUT_ATTEMPT transition
-    is currently unreachable via the public engine (see module docstring),
-    which structurally blocks any bar-history-only test from driving a
-    symbol to BREAKOUT's CONFIRMED state. To still verify *this* module's
-    CONFIRMED-handling logic for the breakout path (scoring wiring, fill/
-    outcome recording, trade-row shape) independently of that upstream
-    engine bug, these tests monkeypatch advance_breakout_state itself so
-    only app.backtest.simulator's own orchestration code is under test.
+    """A real bar-history-only walk to BREAKOUT's CONFIRMED state is covered
+    end-to-end by TestBreakoutConfirmedEndToEnd below (see module
+    docstring). These tests instead monkeypatch advance_breakout_state
+    directly, to verify *this* module's own orchestration logic around a
+    CONFIRMED transition (scoring wiring, fill/outcome recording, trade-row
+    shape, terminal-state short-circuiting, bars_since_confirmed bookkeeping)
+    in isolation from the breakout engine's actual state-transition rules —
+    keeping these tests focused on simulator.py's responsibilities rather
+    than re-deriving the exact bar shapes needed to reach each state.
     """
 
     def test_breakout_confirmed_transition_is_recorded_with_sane_trade_row(self, monkeypatch, flat_bars_factory):
@@ -624,14 +761,12 @@ class TestBreakoutRecordingLogic:
         nifty = _nifty_close(len(bars) + 5, start)
 
         call_count = {"n": 0}
-        real_advance = simulator_module.advance_breakout_state
 
         def fake_advance_breakout_state(current_state, bar_history, resistance_clusters, **kwargs):
             call_count["n"] += 1
             # Walk straight from WATCH to VOLUME_CONFIRMATION on the first
             # call, then confirm on the second — matching the two from_state
-            # checks the real engine would produce, but bypassing the
-            # unreachable APPROACHING->BREAKOUT_ATTEMPT hop.
+            # checks the real engine would produce.
             if call_count["n"] == 1:
                 return EngineResult(new_state=BreakoutState.VOLUME_CONFIRMATION.value, transition_event="TEST_FORCED")
             return EngineResult(
@@ -657,9 +792,69 @@ class TestBreakoutRecordingLogic:
         row = breakout_trades.iloc[0]
         assert row["entry_price"] is not None
         assert row["stop_loss"] == 98.0
-        assert row["target_1r"] == 112.0
+        # Planned entry was 105.0, but bars are flat at 100.0 so the actual
+        # T+1 fill lands near 100, not 105 — a real gap between plan and
+        # fill. target_1r must therefore be re-anchored to the actual fill
+        # (entry_price + 1R against stop_loss=98.0), not the stale
+        # planned-entry-relative 112.0 the engine returned at signal time —
+        # see simulator.py's _rebase_targets_to_fill. Recomputed from the
+        # row's own entry_price rather than hardcoded, since the exact fill
+        # price depends on execution.py's slippage model.
+        expected_risk = row["entry_price"] - row["stop_loss"]
+        assert row["target_1r"] == pytest.approx(row["entry_price"] + 1.0 * expected_risk)
+        assert row["target_1r"] > row["entry_price"]
         assert row["entry_date"] > row["signal_date"]
         assert 0.0 <= row["score"] <= 100.0
+
+    def test_breakout_retest_pending_bars_since_confirmed_counter(self, monkeypatch, flat_bars_factory):
+        """_advance_breakout resets breakout_bars_since_confirmed to 0 on
+        entering RETEST_PENDING and increments it on every subsequent day
+        spent there — verified here via a forced state sequence: WATCH ->
+        RETEST_PENDING (enter, counter reset to 0) -> RETEST_PENDING (stay,
+        counter -> 1) -> RETEST_PENDING (stay, counter -> 2) -> RETEST_
+        CONFIRMED. The counter value is only observable indirectly (it's
+        passed as bars_since_confirmed on the next call), so this test
+        asserts on the exact sequence of bars_since_confirmed values the
+        fake engine observes.
+        """
+        import app.backtest.simulator as simulator_module
+        from app.breakout.breakout_engine import EngineResult
+        from app.breakout.states import BreakoutState
+
+        start = date(2024, 1, 1)
+        bars = flat_bars_factory(90, price=100.0, volume=100_000, start=start)
+        nifty = _nifty_close(len(bars) + 5, start)
+
+        observed_bars_since_confirmed: list[int] = []
+        call_count = {"n": 0}
+
+        def fake_advance_breakout_state(current_state, bar_history, resistance_clusters, bars_since_confirmed=0, **kwargs):
+            call_count["n"] += 1
+            observed_bars_since_confirmed.append(bars_since_confirmed)
+            if call_count["n"] == 1:
+                return EngineResult(new_state=BreakoutState.RETEST_PENDING.value, transition_event="TEST_ENTER_RETEST")
+            if call_count["n"] in (2, 3):
+                return EngineResult(new_state=BreakoutState.RETEST_PENDING.value, transition_event=None)
+            return EngineResult(new_state=BreakoutState.RETEST_CONFIRMED.value, transition_event="TEST_RETEST_CONFIRMED")
+
+        monkeypatch.setattr(simulator_module, "advance_breakout_state", fake_advance_breakout_state)
+
+        run_backtest(
+            bars_by_symbol={"AAA": bars},
+            strategy_version=STRATEGY_VERSION,
+            start_date=start,
+            end_date=bars.index[-1].date(),
+            nifty_close=nifty,
+        )
+
+        # First call: state starts at WATCH (default), counter is the
+        # dataclass default 0. Second/third calls: now RETEST_PENDING,
+        # counter increments each day. Fourth call: still RETEST_PENDING
+        # from_state, counter keeps incrementing right up to the
+        # RETEST_CONFIRMED transition (which is itself non-terminal, so a
+        # 5th call would follow if the scenario had more days after this
+        # point — not needed to prove the counter logic itself).
+        assert observed_bars_since_confirmed[:4] == [0, 0, 1, 2]
 
     def test_breakout_terminal_state_stops_advancing(self, monkeypatch, flat_bars_factory):
         """Once a symbol's breakout state machine reaches a terminal state
@@ -695,3 +890,383 @@ class TestBreakoutRecordingLogic:
         # the symbol first has >=60 bars; after that one call it goes
         # terminal and must never be called again for the remaining days.
         assert call_count["n"] == 1
+
+
+class TestBreakoutConfirmedEndToEnd:
+    """Positive control mirroring TestClearSignalProducesConfirmedSetup's
+    DIP_BUY coverage, but for BREAKOUT: _breakout_scenario drives the real,
+    unmocked advance_breakout_state (via run_backtest's normal per-day
+    resistance_clusters/support_clusters computation) all the way from
+    WATCH through APPROACHING, BREAKOUT_ATTEMPT, CANDLE_CONFIRMATION,
+    VOLUME_CONFIRMATION, to CONFIRMED, and asserts a real trade_setups-shaped
+    row comes out the other end of run_backtest with setup_type=BREAKOUT.
+    """
+
+    def test_breakout_scenario_produces_confirmed_trade_row(self):
+        start = date(2024, 1, 1)
+        bars = _breakout_scenario(start)
+        nifty = _nifty_close(len(bars) + 5, start)
+
+        trades = run_backtest(
+            bars_by_symbol={"AAA": bars},
+            strategy_version=STRATEGY_VERSION,
+            start_date=start,
+            end_date=bars.index[-1].date(),
+            nifty_close=nifty,
+        )
+
+        breakout_trades = trades[trades["setup_type"] == "BREAKOUT"]
+        assert len(breakout_trades) == 1
+        row = breakout_trades.iloc[0]
+
+        assert row["symbol"] == "AAA"
+        assert row["setup_type"] == "BREAKOUT"
+        assert row["strategy_version"] == STRATEGY_VERSION
+        assert row["entry_price"] is not None
+        assert row["stop_loss"] is not None
+        assert row["stop_loss"] < row["entry_price"]
+        assert row["target_1r"] > row["entry_price"]
+        assert row["entry_date"] > row["signal_date"]
+        assert 0.0 <= row["score"] <= 100.0
+
+    def test_breakout_scenario_no_look_ahead(self):
+        """Same no-look-ahead invariant as TestNoLookAheadGuarantee, applied
+        specifically to the breakout path: truncating the input to the
+        CONFIRMED bar (or earlier) must reproduce the same trade_setups the
+        full run produces for that same date range.
+        """
+        start = date(2024, 1, 1)
+        full_bars = _breakout_scenario(start)
+        nifty_full = _nifty_close(len(full_bars) + 5, start)
+
+        full_trades = run_backtest(
+            bars_by_symbol={"AAA": full_bars},
+            strategy_version=STRATEGY_VERSION,
+            start_date=start,
+            end_date=full_bars.index[-1].date(),
+            nifty_close=nifty_full,
+        )
+        breakout_row = full_trades[full_trades["setup_type"] == "BREAKOUT"].iloc[0]
+        confirmed_cutoff = breakout_row["signal_date"]
+        # +1 day so the truncated run still includes the fill (T+1) bar —
+        # entry_price is only populated once attempt_entry_fill has a next
+        # bar to evaluate, same buffer TestNoLookAheadGuarantee uses
+        # (DIP_BUY_SIGNAL_INDEX + 2).
+        fill_cutoff = confirmed_cutoff + timedelta(days=1)
+
+        truncated_bars = full_bars[full_bars.index.date <= fill_cutoff]
+        nifty_truncated = _nifty_close(len(truncated_bars) + 5, start)
+
+        truncated_trades = run_backtest(
+            bars_by_symbol={"AAA": truncated_bars},
+            strategy_version=STRATEGY_VERSION,
+            start_date=start,
+            end_date=fill_cutoff,
+            nifty_close=nifty_truncated,
+        )
+
+        truncated_breakout_row = truncated_trades[truncated_trades["setup_type"] == "BREAKOUT"].iloc[0]
+        assert truncated_breakout_row["signal_date"] == breakout_row["signal_date"]
+        assert truncated_breakout_row["entry_price"] == pytest.approx(breakout_row["entry_price"])
+        assert truncated_breakout_row["stop_loss"] == pytest.approx(breakout_row["stop_loss"])
+        assert truncated_breakout_row["score"] == pytest.approx(breakout_row["score"])
+
+
+class TestReversalPatternAdapter:
+    """_reversal_pattern adapts across app.market.candles' two possible
+    public shapes (see module docstring) — tested by patching attributes
+    directly on the real app.market.candles module object (which is what
+    _reversal_pattern's `from app.market import candles as candles_module`
+    actually resolves against, since the submodule is cached on the parent
+    package once imported) so this module's own adapter logic is proven
+    independent of whichever shape candles.py currently exposes.
+    """
+
+    _BARS = pd.DataFrame({"open": [1, 2, 3], "high": [1, 2, 3], "low": [1, 2, 3], "close": [1, 2, 3], "volume": [1, 1, 1]})
+
+    def test_uses_has_bullish_reversal_when_present_and_truthy_string(self, monkeypatch):
+        import app.market.candles as candles_module
+
+        monkeypatch.setattr(candles_module, "has_bullish_reversal", lambda bars: "HAMMER", raising=False)
+
+        assert _reversal_pattern(self._BARS) == "HAMMER"
+
+    def test_uses_has_bullish_reversal_when_present_and_falsy(self, monkeypatch):
+        import app.market.candles as candles_module
+
+        monkeypatch.setattr(candles_module, "has_bullish_reversal", lambda bars: False, raising=False)
+
+        assert _reversal_pattern(self._BARS) is None
+
+    def test_falls_back_to_detect_reversal_pattern(self, monkeypatch):
+        import app.market.candles as candles_module
+
+        monkeypatch.delattr(candles_module, "has_bullish_reversal", raising=False)
+        monkeypatch.setattr(
+            candles_module, "detect_reversal_pattern", lambda bars: {"pattern": "MORNING_STAR", "bar_date": None}
+        )
+
+        assert _reversal_pattern(self._BARS) == "MORNING_STAR"
+
+    def test_returns_none_when_candles_module_exposes_neither_function(self, monkeypatch):
+        import app.market.candles as candles_module
+
+        monkeypatch.delattr(candles_module, "has_bullish_reversal", raising=False)
+        monkeypatch.delattr(candles_module, "detect_reversal_pattern", raising=False)
+
+        assert _reversal_pattern(self._BARS) is None
+
+
+class TestIndicatorValueHelper:
+    def test_returns_none_when_latest_indicators_is_none(self):
+        assert _indicator_value(None, "atr") is None
+
+    def test_returns_none_when_column_value_is_nan(self):
+        row = pd.Series({"atr": float("nan"), "ema20": 10.0})
+        assert _indicator_value(row, "atr") is None
+
+    def test_returns_float_for_present_value(self):
+        row = pd.Series({"atr": 2.5, "ema20": 10.0})
+        assert _indicator_value(row, "atr") == 2.5
+
+
+class _FakeSession:
+    """Minimal stand-in for a SQLAlchemy Session, dispatching by the ORM
+    entity class embedded in the select() query (query.column_descriptions[0]
+    ["entity"], stable across .where() clauses) rather than talking to a
+    real database. Only implements the subset of the Session API
+    run_backtest_and_persist actually calls: scalars().all(), scalar(),
+    add(), and flush() (no-op).
+    """
+
+    def __init__(self, stocks, daily_bars_by_stock_id):
+        self._stocks = stocks
+        self._daily_bars_by_stock_id = daily_bars_by_stock_id
+        self.added: list = []
+        self._next_id = 1
+
+    def _entity(self, query):
+        return query.column_descriptions[0]["entity"]
+
+    def scalars(self, query):
+        from app.db.models import DailyOHLCV, Stock
+
+        entity = self._entity(query)
+        if entity is Stock:
+            return _FakeScalarResult(list(self._stocks))
+        if entity is DailyOHLCV:
+            # Only ever queried with a stock_id equality filter in
+            # run_backtest_and_persist / _load_bars_df — extract it from the
+            # compiled query's bound parameters rather than trying to
+            # re-interpret the whole WHERE clause generically.
+            stock_id = _extract_equality_param(query, "stock_id")
+            return _FakeScalarResult(self._daily_bars_by_stock_id.get(stock_id, []))
+        raise NotImplementedError(entity)
+
+    def scalar(self, query):
+        results = self.scalars(query).all()
+        return results[0] if results else None
+
+    def add(self, obj):
+        if getattr(obj, "id", None) is None:
+            obj.id = self._next_id
+            self._next_id += 1
+        self.added.append(obj)
+
+    def flush(self):
+        pass
+
+
+class _FakeScalarResult:
+    def __init__(self, items):
+        self._items = items
+
+    def all(self):
+        return list(self._items)
+
+
+def _extract_equality_param(query, column_name: str):
+    """SQLAlchemy's compiled bind params carry the literal filter value
+    regardless of clause shape — simplest reliable extraction for this
+    narrow, single-equality-filter use case (run_backtest_and_persist only
+    ever queries DailyOHLCV filtered by a single stock_id).
+    """
+    compiled = query.compile()
+    for key, value in compiled.params.items():
+        if key.startswith(column_name):
+            return value
+    return None
+
+
+class TestRunBacktestAndPersist:
+    """run_backtest_and_persist is the DB-loading/persisting wrapper around
+    the pure run_backtest — tested here against a fake in-memory session so
+    no real database is required, matching this repo's no-live-DB testing
+    convention (see tests/conftest.py's module docstring).
+    """
+
+    def _make_stock(self, symbol: str, sector: str | None = "IT", listing_status: str = "ACTIVE"):
+        from app.db.models import Stock
+
+        stock = Stock(symbol=symbol, name=symbol, sector=sector, listing_status=listing_status)
+        stock.id = abs(hash(symbol)) % 100_000 + 1
+        return stock
+
+    def _make_daily_bars(self, stock_id: int, bars: pd.DataFrame) -> list:
+        from app.db.models import DailyOHLCV
+
+        rows = []
+        for idx, row in bars.iterrows():
+            rows.append(
+                DailyOHLCV(
+                    stock_id=stock_id,
+                    trade_date=idx.date() if hasattr(idx, "date") else idx,
+                    open=row["open"],
+                    high=row["high"],
+                    low=row["low"],
+                    close=row["close"],
+                    adjusted_close=row["close"],
+                    volume=int(row["volume"]),
+                )
+            )
+        return rows
+
+    def test_persists_confirmed_trade_setup_and_backtest_result(self):
+        start = date(2024, 1, 1)
+        aaa_bars = _dip_buy_scenario(start)
+        nifty_stock = self._make_stock("^NSEI", sector=None)
+        aaa_stock = self._make_stock("AAA", sector="IT")
+
+        session = _FakeSession(
+            stocks=[aaa_stock, nifty_stock],
+            daily_bars_by_stock_id={
+                aaa_stock.id: self._make_daily_bars(aaa_stock.id, aaa_bars),
+                nifty_stock.id: self._make_daily_bars(nifty_stock.id, _nifty_close(len(aaa_bars) + 5, start).to_frame("close").assign(open=lambda d: d["close"], high=lambda d: d["close"], low=lambda d: d["close"], volume=100_000)),
+            },
+        )
+
+        trades = run_backtest_and_persist(
+            session=session,
+            strategy_version=STRATEGY_VERSION,
+            start_date=start,
+            end_date=aaa_bars.index[-1].date(),
+        )
+
+        assert not trades.empty
+
+        from app.db.models import BacktestResult, TradeSetup
+
+        persisted_setups = [obj for obj in session.added if isinstance(obj, TradeSetup)]
+        persisted_results = [obj for obj in session.added if isinstance(obj, BacktestResult)]
+
+        assert len(persisted_setups) == len(trades)
+        assert persisted_setups[0].strategy_version == STRATEGY_VERSION
+        assert len(persisted_results) == 1
+        assert persisted_results[0].total_trades == len(trades)
+
+    def test_symbols_filter_restricts_universe(self):
+        start = date(2024, 1, 1)
+        aaa_bars = _dip_buy_scenario(start)
+        nifty_stock = self._make_stock("^NSEI", sector=None)
+        aaa_stock = self._make_stock("AAA", sector="IT")
+        bbb_stock = self._make_stock("BBB", sector="PHARMA")
+
+        session = _FakeSession(
+            stocks=[aaa_stock, bbb_stock, nifty_stock],
+            daily_bars_by_stock_id={
+                aaa_stock.id: self._make_daily_bars(aaa_stock.id, aaa_bars),
+                bbb_stock.id: self._make_daily_bars(bbb_stock.id, aaa_bars),
+                nifty_stock.id: self._make_daily_bars(nifty_stock.id, _nifty_close(len(aaa_bars) + 5, start).to_frame("close").assign(open=lambda d: d["close"], high=lambda d: d["close"], low=lambda d: d["close"], volume=100_000)),
+            },
+        )
+
+        trades = run_backtest_and_persist(
+            session=session,
+            strategy_version=STRATEGY_VERSION,
+            start_date=start,
+            end_date=aaa_bars.index[-1].date(),
+            symbols=["AAA"],
+        )
+
+        assert set(trades["symbol"].unique()) == {"AAA"}
+
+    def test_no_nifty_stock_found_still_returns_empty_result_without_crashing(self):
+        start = date(2024, 1, 1)
+        aaa_stock = self._make_stock("AAA", sector="IT")
+        session = _FakeSession(stocks=[aaa_stock], daily_bars_by_stock_id={})
+
+        trades = run_backtest_and_persist(
+            session=session,
+            strategy_version=STRATEGY_VERSION,
+            start_date=start,
+            end_date=start + timedelta(days=5),
+        )
+
+        assert trades.empty
+
+    def test_trade_row_for_unknown_symbol_is_skipped_defensively(self, monkeypatch):
+        """Defensive guard: if run_backtest ever returned a row for a symbol
+        not in this run's stock_by_symbol (structurally shouldn't happen
+        given bars_by_symbol is itself built from stock_by_symbol, but
+        worth guarding since this function crosses the pure/DB boundary),
+        run_backtest_and_persist must skip it rather than crash on a
+        missing stock lookup.
+        """
+        import app.backtest.simulator as simulator_module
+
+        start = date(2024, 1, 1)
+        aaa_stock = self._make_stock("AAA", sector="IT")
+        nifty_stock = self._make_stock("^NSEI", sector=None)
+        session = _FakeSession(
+            stocks=[aaa_stock, nifty_stock],
+            daily_bars_by_stock_id={
+                aaa_stock.id: self._make_daily_bars(aaa_stock.id, _dip_buy_scenario(start)),
+                nifty_stock.id: [],
+            },
+        )
+
+        fake_trades = pd.DataFrame(
+            [
+                {
+                    "symbol": "UNKNOWN",
+                    "setup_type": "BREAKOUT",
+                    "strategy_version": STRATEGY_VERSION,
+                    "signal_date": start,
+                    "entry_date": None,
+                    "entry_price": None,
+                    "stop_loss": 10.0,
+                    "target_1r": 11.0,
+                    "target_1_5r": 11.5,
+                    "target_2r": 12.0,
+                    "target_3r": 13.0,
+                    "nearest_structural_target": None,
+                    "score": 50.0,
+                    "tier": "C",
+                    "sector": None,
+                    "regime": "NEUTRAL",
+                    "exit_reason": "SESSION_END",
+                    "exit_date": None,
+                    "exit_price": None,
+                    "target_hit": None,
+                    "sl_hit": False,
+                    "mfe": None,
+                    "mae": None,
+                    "holding_days": None,
+                    "pnl": None,
+                }
+            ]
+        )
+        monkeypatch.setattr(simulator_module, "run_backtest", lambda **kwargs: fake_trades)
+
+        from app.db.models import TradeSetup
+
+        trades = run_backtest_and_persist(
+            session=session,
+            strategy_version=STRATEGY_VERSION,
+            start_date=start,
+            end_date=start + timedelta(days=5),
+        )
+
+        assert len(trades) == 1  # the unknown-symbol row is still returned...
+        persisted_setups = [obj for obj in session.added if isinstance(obj, TradeSetup)]
+        assert persisted_setups == []  # ...but never persisted, since no matching stock exists

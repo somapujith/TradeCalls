@@ -28,6 +28,22 @@ scheduler = BackgroundScheduler(timezone=settings.scheduler_timezone)
 INGESTION_LOOKBACK_DAYS = 400  # enough history for SMA200/52W levels on a fresh symbol
 
 
+def _numeric_or_none(value: float | None) -> float | None:
+    """compute_indicators' rolling-window columns are NaN (or pandas' <NA>
+    for nullable-dtype columns like rsi) until their window warms up
+    (correct, not a bug — see app/market/indicators.py) — a SQLAlchemy
+    Numeric column needs None, not NaN/<NA>, so coerce here rather than
+    writing either into a numeric column.
+    """
+    if value is None:
+        return None
+    import pandas as pd  # deferred: matches this module's lazy-import convention
+
+    if pd.isna(value):
+        return None
+    return float(value)
+
+
 def run_eod_ingestion() -> None:
     """Pulls yfinance_client for the active universe, then chains into derived
     data refresh."""
@@ -94,7 +110,10 @@ def run_derived_data_refresh() -> None:
                     index=[r.trade_date for r in rows],
                 )
                 latest_date = rows[-1].trade_date
-                row = compute_indicators(bars)
+                indicators = compute_indicators(bars)
+                if indicators.empty:
+                    continue
+                row = indicators.iloc[-1]
 
                 existing = db.scalar(
                     sa_select(TechnicalIndicator).where(
@@ -106,17 +125,17 @@ def run_derived_data_refresh() -> None:
                     existing = TechnicalIndicator(stock_id=stock.id, trade_date=latest_date)
                     db.add(existing)
 
-                existing.ema9 = row.ema9
-                existing.ema20 = row.ema20
-                existing.ema50 = row.ema50
-                existing.sma100 = row.sma100
-                existing.sma200 = row.sma200
-                existing.rsi = row.rsi
-                existing.macd = row.macd
-                existing.macd_signal = row.macd_signal
-                existing.atr = row.atr
-                existing.bb_upper = row.bb_upper
-                existing.bb_lower = row.bb_lower
+                existing.ema9 = _numeric_or_none(row.ema9)
+                existing.ema20 = _numeric_or_none(row.ema20)
+                existing.ema50 = _numeric_or_none(row.ema50)
+                existing.sma100 = _numeric_or_none(row.sma100)
+                existing.sma200 = _numeric_or_none(row.sma200)
+                existing.rsi = _numeric_or_none(row.rsi)
+                existing.macd = _numeric_or_none(row.macd)
+                existing.macd_signal = _numeric_or_none(row.macd_signal)
+                existing.atr = _numeric_or_none(row.atr)
+                existing.bb_upper = _numeric_or_none(row.bb_upper)
+                existing.bb_lower = _numeric_or_none(row.bb_lower)
 
                 db.commit()
                 refreshed += 1
