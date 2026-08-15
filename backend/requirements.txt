@@ -10,3 +10,4 @@ pandas-ta==0.3.14b0
 yfinance==0.2.51
 pytest==8.3.4
 python-dotenv==1.0.1
+neo_api_client @ git+https://github.com/Kotak-Neo/kotak-neo-api.git#egg=neo_api_client
