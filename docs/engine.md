@@ -91,9 +91,9 @@ On CONFIRMED: entry = reversal candle's close (or a small ATR-aware buffer above
 
 ### Breakout weights
 
-VWAP's 10 and news catalyst's 2 excluded in v1 — remaining 88 points renormalized to 100:
+VWAP and news catalyst excluded in v1 (no intraday data / no news engine yet — see Zero-Budget Constraint and Scope of v1 above); the remaining components are reweighted to sum to 99, not rescaled to a clean 100 — a market-regime multiplier (see Hard rejection rules below) is applied on top and can push the final score above 100 for a STRONG_BULL regime, so the raw component sum doesn't need to hit exactly 100 on its own. Implemented in `breakout/scoring.py`'s `BREAKOUT_WEIGHTS`:
 
-| Component | Weight (v1, renormalized) |
+| Component | Weight (v1) |
 |---|---:|
 | Resistance breakout | 17 |
 | Relative volume | 23 |
@@ -103,12 +103,13 @@ VWAP's 10 and news catalyst's 2 excluded in v1 — remaining 88 points renormali
 | Relative strength | 11 |
 | Market confirmation | 6 |
 | Sector confirmation | 3 |
+| **Total** | **99** |
 
 ### Dip-buy weights
 
-Same 88-point base (VWAP/news excluded) but reweighted — trend strength and reversal-candle quality matter more than breakout volume does for this setup; "resistance breakout" is replaced by "support hold quality" (how cleanly price respected the support cluster without violating it intrabar):
+Same exclusions as breakout (no VWAP, no news catalyst) but reweighted — trend strength and reversal-candle quality matter more than breakout volume does for this setup; "resistance breakout" is replaced by "support hold quality" (how cleanly price respected the support cluster without violating it intrabar). Sums to 100 (breakout's 99 and dip-buy's 100 are each the result of independently tuning per-component weights for their setup, not a shared renormalization target — see `breakout/scoring.py`'s `DIP_BUY_WEIGHTS`):
 
-| Component | Weight (v1, renormalized) |
+| Component | Weight (v1) |
 |---|---:|
 | Support hold quality | 15 |
 | Relative volume (on reversal bar) | 18 |
@@ -118,6 +119,7 @@ Same 88-point base (VWAP/news excluded) but reweighted — trend strength and re
 | Relative strength | 10 |
 | Market confirmation | 5 |
 | Sector confirmation | 2 |
+| **Total** | **100** |
 
 Interpretation unchanged from original doc for both setups: 90-100 A+, 80-89 A, 70-79 B, 60-69 C, <60 ignore.
 
