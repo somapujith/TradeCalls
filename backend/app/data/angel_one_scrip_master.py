@@ -77,6 +77,15 @@ def resolve_equity_token(symbol: str) -> str | None:
     return _load().get(symbol)
 
 
+def list_nse_equity_symbols() -> list[str]:
+    """All bare NSE cash-equity symbols known to Angel One's scrip master
+    (~2660 as of 2026-08-17 — includes some ETFs that share the "-EQ"
+    suffix/blank instrumenttype convention with true equities; not
+    separately filtered out, acceptable for universe-seeding purposes).
+    Used by scripts/seed_full_nse_universe.py."""
+    return sorted(_load().keys())
+
+
 def reset_cache_for_tests() -> None:
     global _cache
     _cache = None
