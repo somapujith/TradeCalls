@@ -97,7 +97,7 @@ class TestRunEodIngestion:
             ingested_symbols.append(symbol)
             return 1
 
-        monkeypatch.setattr("app.data.yfinance_client.ingest_symbol", fake_ingest_symbol)
+        monkeypatch.setattr("app.data.angel_one_ohlcv.ingest_symbol", fake_ingest_symbol)
 
         chained: list[str] = []
         monkeypatch.setattr(
@@ -123,7 +123,7 @@ class TestRunEodIngestion:
             ingested_symbols.append(symbol)
             return 1
 
-        monkeypatch.setattr("app.data.yfinance_client.ingest_symbol", fake_ingest_symbol)
+        monkeypatch.setattr("app.data.angel_one_ohlcv.ingest_symbol", fake_ingest_symbol)
         monkeypatch.setattr(scheduler_module, "run_derived_data_refresh", lambda: None)
 
         # Must not raise.
@@ -133,7 +133,7 @@ class TestRunEodIngestion:
 
     def test_chains_into_derived_data_refresh_on_success(self, db_session, monkeypatch):
         _make_stock(db_session, "AAA")
-        monkeypatch.setattr("app.data.yfinance_client.ingest_symbol", lambda session, symbol, start, end: 1)
+        monkeypatch.setattr("app.data.angel_one_ohlcv.ingest_symbol", lambda session, symbol, start, end: 1)
 
         call_count = {"n": 0}
         monkeypatch.setattr(scheduler_module, "run_derived_data_refresh", lambda: call_count.__setitem__("n", call_count["n"] + 1))
@@ -284,7 +284,7 @@ class TestRunBreakoutStateAdvance:
         calls: list[str] = []
 
         monkeypatch.setattr(
-            "app.data.yfinance_client.fetch_daily_ohlcv",
+            "app.data.angel_one_ohlcv.fetch_daily_ohlcv",
             lambda symbol, start, end: (calls.append("fetch_daily_ohlcv"), self._fake_nifty_bars())[1],
         )
         monkeypatch.setattr(
@@ -314,7 +314,7 @@ class TestRunBreakoutStateAdvance:
     def test_creates_nifty_stock_row_if_missing(self, db_session, monkeypatch):
         _make_stock(db_session, "AAA")
 
-        monkeypatch.setattr("app.data.yfinance_client.fetch_daily_ohlcv", lambda symbol, start, end: self._fake_nifty_bars())
+        monkeypatch.setattr("app.data.angel_one_ohlcv.fetch_daily_ohlcv", lambda symbol, start, end: self._fake_nifty_bars())
         monkeypatch.setattr("app.data.yfinance_client.upsert_daily_ohlcv", lambda session, stock_id, bars: len(bars))
         monkeypatch.setattr("app.api.deps.generate_strategy_version", lambda: "ts-test")
         monkeypatch.setattr("app.backtest.simulator.run_backtest_and_persist", lambda session, **kwargs: pd.DataFrame())
@@ -330,7 +330,7 @@ class TestRunBreakoutStateAdvance:
     def test_empty_nifty_bars_skips_backtest_without_crashing(self, db_session, monkeypatch):
         _make_stock(db_session, "AAA")
 
-        monkeypatch.setattr("app.data.yfinance_client.fetch_daily_ohlcv", lambda symbol, start, end: pd.DataFrame())
+        monkeypatch.setattr("app.data.angel_one_ohlcv.fetch_daily_ohlcv", lambda symbol, start, end: pd.DataFrame())
         monkeypatch.setattr("app.data.yfinance_client.upsert_daily_ohlcv", lambda session, stock_id, bars: 0)
 
         called = {"n": 0}
@@ -344,7 +344,7 @@ class TestRunBreakoutStateAdvance:
         assert called["n"] == 0
 
     def test_no_active_symbols_skips_backtest_without_crashing(self, db_session, monkeypatch):
-        monkeypatch.setattr("app.data.yfinance_client.fetch_daily_ohlcv", lambda symbol, start, end: self._fake_nifty_bars())
+        monkeypatch.setattr("app.data.angel_one_ohlcv.fetch_daily_ohlcv", lambda symbol, start, end: self._fake_nifty_bars())
         monkeypatch.setattr("app.data.yfinance_client.upsert_daily_ohlcv", lambda session, stock_id, bars: len(bars))
 
         called = {"n": 0}
@@ -360,7 +360,7 @@ class TestRunBreakoutStateAdvance:
     def test_downstream_exception_is_caught_rolled_back_and_does_not_crash(self, db_session, monkeypatch):
         _make_stock(db_session, "AAA")
 
-        monkeypatch.setattr("app.data.yfinance_client.fetch_daily_ohlcv", lambda symbol, start, end: self._fake_nifty_bars())
+        monkeypatch.setattr("app.data.angel_one_ohlcv.fetch_daily_ohlcv", lambda symbol, start, end: self._fake_nifty_bars())
         monkeypatch.setattr("app.data.yfinance_client.upsert_daily_ohlcv", lambda session, stock_id, bars: len(bars))
         monkeypatch.setattr("app.api.deps.generate_strategy_version", lambda: "ts-test")
 

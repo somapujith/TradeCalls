@@ -45,10 +45,10 @@ def _numeric_or_none(value: float | None) -> float | None:
 
 
 def run_eod_ingestion() -> None:
-    """Pulls yfinance_client for the active universe, then chains into derived
+    """Pulls angel_one_ohlcv for the active universe, then chains into derived
     data refresh."""
     logger.info("EOD ingestion job starting")
-    from app.data.yfinance_client import ingest_symbol
+    from app.data.angel_one_ohlcv import ingest_symbol
     from app.db.models import Stock
 
     db: Session = SessionLocal()
@@ -173,7 +173,8 @@ def run_breakout_state_advance() -> None:
     logger.info("Breakout state advance job starting")
     from app.api.deps import generate_strategy_version
     from app.backtest.simulator import run_backtest_and_persist
-    from app.data.yfinance_client import fetch_daily_ohlcv, upsert_daily_ohlcv
+    from app.data.angel_one_ohlcv import fetch_daily_ohlcv
+    from app.data.yfinance_client import upsert_daily_ohlcv
     from app.db.models import Stock
 
     db: Session = SessionLocal()

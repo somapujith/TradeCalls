@@ -30,11 +30,19 @@ class Settings(BaseSettings):
     yfinance_max_retries: int = 3
     yfinance_backoff_seconds: float = 2.0
 
-    # Angel One SmartAPI (free, LTP display only — docs/engine.md#live-data-angel-one)
+    # Angel One SmartAPI — now also the daily OHLCV ingestion source
+    # (app/data/angel_one_ohlcv.py), not just LTP display. See
+    # docs/engine.md#live-data-angel-one for why: yfinance started failing
+    # wholesale (Yahoo blocking/empty responses) on 2026-08-17.
     angel_one_api_key: str = ""
     angel_one_client_code: str = ""
     angel_one_mpin: str = ""  # SmartAPI's generateSession takes MPIN in the password slot for MPIN-only accounts
     angel_one_totp_secret: str = ""  # base32 TOTP seed from SmartAPI portal 2FA setup
+    # Angel One's per-second rate limit for historical candle requests isn't
+    # publicly documented in detail — this delay between per-symbol
+    # getCandleData calls is a conservative guess (~3 req/s), not a verified
+    # SLA. Tighten once actual throttling behavior is observed.
+    angel_one_candle_request_delay_seconds: float = 0.4
 
     # LTP cache TTL (seconds) — see docs/api.md GET /api/calls
     ltp_cache_ttl_seconds: int = 60
