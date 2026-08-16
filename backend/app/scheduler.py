@@ -44,12 +44,37 @@ def _numeric_or_none(value: float | None) -> float | None:
     return float(value)
 
 
+def run_news_collection() -> None:
+    """Fetches + classifies + persists news (app/news/persist.py) — a
+    separate top-level try/except from run_eod_ingestion's own so a news
+    source outage never blocks price ingestion. Runs once per EOD cycle
+    for now; a genuinely intraday news refresh needs the continuous
+    monitoring loop (not built yet, see the news/events discussion in
+    docs/engine.md).
+    """
+    logger.info("News collection job starting")
+    from app.news.persist import fetch_classify_and_persist
+
+    db: Session = SessionLocal()
+    try:
+        inserted = fetch_classify_and_persist(db)
+        db.commit()
+        logger.info("News collection job complete: %d new articles", inserted)
+    except Exception:
+        db.rollback()
+        logger.exception("News collection job failed")
+    finally:
+        db.close()
+
+
 def run_eod_ingestion() -> None:
     """Pulls angel_one_ohlcv for the active universe, then chains into derived
     data refresh."""
     logger.info("EOD ingestion job starting")
     from app.data.angel_one_ohlcv import ingest_symbol
     from app.db.models import Stock
+
+    run_news_collection()
 
     db: Session = SessionLocal()
     ingested = 0

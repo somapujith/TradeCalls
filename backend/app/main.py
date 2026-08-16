@@ -12,6 +12,7 @@ from app.api.backtest_runs import router as backtest_runs_router
 from app.api.backtests import router as backtests_router
 from app.api.calls import router as calls_router
 from app.api.ltp import router as ltp_router
+from app.api.news import router as news_router
 from app.api.stocks import router as stocks_router
 from app.api.universe import router as universe_router
 from app.db.models import Base  # noqa: F401  (registers ORM tables on Base.metadata)
@@ -69,6 +70,7 @@ app.include_router(backtests_router)
 app.include_router(backtest_runs_router)
 app.include_router(calls_router)
 app.include_router(ltp_router)
+app.include_router(news_router)
 app.include_router(stocks_router)
 app.include_router(universe_router)
 

@@ -205,3 +205,34 @@ class BacktestResult(Base):
     breakdown_by_day_of_week: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     breakdown_by_regime: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class NewsArticle(Base):
+    """Persisted, classified news — see app/news/classifier.py and
+    app/news/persist.py. Previously news was fetched fresh per-call and
+    discarded (docs/db.md listed `news` as a deferred table); this is that
+    table, added once a frontend News tab needed real history to show.
+    """
+
+    __tablename__ = "news_articles"
+    __table_args__ = (
+        Index("ix_news_articles_symbol_published", "symbol", "published_at"),
+        Index("ix_news_articles_severity", "severity"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    symbol: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)  # null = untagged, no known symbol match
+    headline: Mapped[str] = mapped_column(String(512), nullable=False)
+    # "rss:" + full feed URL (see scraper_rss_fallback.py) can exceed 64
+    # chars easily (e.g. the Economic Times feed URL alone is 70+ chars) —
+    # sized generously rather than truncating a real source string.
+    source: Mapped[str] = mapped_column(String(256), nullable=False)
+    url: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)  # dedup key
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)  # e.g. LEGAL, EARNINGS, ORDER_WIN — see classifier.py
+    sentiment: Mapped[str] = mapped_column(String(16), nullable=False)  # POSITIVE | NEGATIVE | NEUTRAL
+    severity: Mapped[int] = mapped_column(Integer, nullable=False)  # 0-5, see classifier.py's doc-section-27 scale
+    confidence: Mapped[float] = mapped_column(Numeric(4, 3), nullable=False)  # 0-1, rule-match strength not a calibrated probability
