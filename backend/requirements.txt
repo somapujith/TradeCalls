@@ -19,9 +19,13 @@ pytest-cov==6.0.0
 python-dotenv==1.0.1
 alembic==1.13.3
 
-# Kotak Neo SDK — pinned repo unreachable (404) as of 2026-08-16.
-# Client code has an in-repo stub fallback until this resolves; see app/data/kotak_neo_client.py.
-# neo_api_client @ git+https://github.com/Kotak-Neo/kotak-neo-api.git#egg=neo_api_client
+# Angel One SmartAPI SDK — official PyPI package, free Trade API.
+# See app/data/angel_one_client.py. pyotp computes login TOTPs from the
+# base32 secret in ANGEL_ONE_TOTP_SECRET (SmartAPI's 2FA is TOTP-based, not
+# a static MPIN like the earlier Kotak Neo integration this replaces).
+smartapi-python==1.5.5
+logzero==1.7.0
+pyotp==2.9.0
 
 # News collection module (app/news/) — free-tier APIs + HTML/RSS scraping, standalone (not wired into scoring)
 requests==2.34.2

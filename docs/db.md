@@ -26,7 +26,7 @@ Connection via `DATABASE_URL` (Neon connection string, `sslmode=require`) in `ba
 
 ## Deferred tables (future intraday/live slice — not built in v1)
 
-Per the original planning doc — `market_ticks`, `candles_1m`, `candles_5m`, `candles_15m`, `volume_profiles`, `market_sessions`. These require a live tick feed, candle-builder, and intraday-aware breakout/dip-buy engines, none of which are built yet — see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning). No longer budget-blocked (Kotak Neo's free WebSocket feed removes that wall), but still genuinely deferred pending the daily-bar engines proving out first per engine.md's recommended sequencing. Do not build these until that design doc marks live scanning in scope.
+Per the original planning doc — `market_ticks`, `candles_1m`, `candles_5m`, `candles_15m`, `volume_profiles`, `market_sessions`. These require a live tick feed, candle-builder, and intraday-aware breakout/dip-buy engines, none of which are built yet — see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning). No longer necessarily budget-blocked (Angel One SmartAPI's likely-free WebSocket feed may remove that wall — unverified, see [engine.md](engine.md#live-data-angel-one)), but still genuinely deferred pending the daily-bar engines proving out first per engine.md's recommended sequencing. Do not build these until that design doc marks live scanning in scope.
 
 `news`, `corporate_announcements`, `telegram_alerts`, `model_decisions` remain deferred for the same reason — free paths exist (unofficial NSE scraping, free RSS, free Telegram Bot API) but the news/AI engines that would populate them aren't built yet. See engine.md's news-engine scope note.
 

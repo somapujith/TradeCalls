@@ -27,9 +27,9 @@ def _terminal_states() -> set[str]:
 
 def _fetch_ltp_safe(symbol: str) -> float | None:
     try:
-        from app.data import kotak_neo_client as kotak_neo_module
+        from app.data import angel_one_client as angel_one_module
 
-        quote = kotak_neo_module.get_ltp_safe(symbol)
+        quote = angel_one_module.get_ltp_safe(symbol)
         return quote["price"] if quote is not None else None
     except Exception as exc:
         logger.warning("LTP lookup failed for %s in /api/calls: %s", symbol, exc)

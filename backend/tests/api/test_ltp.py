@@ -2,14 +2,19 @@
 
 Key contract points under test:
 - Response: symbol, price, timestamp.
-- 502 (not 404) when the Kotak Neo lookup fails — the symbol may be valid,
+- 502 (not 404) when the Angel One lookup fails — the symbol may be valid,
   the live lookup is what's unavailable. Frontend must treat this as
   "LTP unavailable," not "symbol doesn't exist."
-- app/api/ltp.py calls `kotak_neo_client.get_ltp(symbol)` expecting a
+- app/api/ltp.py calls `angel_one_client.get_ltp(symbol)` expecting a
   {"price": float, "timestamp": float} dict on success, and treats any
-  exception (KotakNeoNotConfiguredError, KotakNeoRequestError, or anything
+  exception (AngelOneNotConfiguredError, AngelOneRequestError, or anything
   else) as a 502 — `symbol` itself comes from the path param, not the dict.
 - No DB dependency — this route is pure passthrough to the live client.
+- These tests monkeypatch `app.data.angel_one_client.get_ltp` wholesale, so
+  the fakes below intentionally ignore the real implementation's
+  symbol_token requirement (see angel_one_client.get_ltp's docstring) —
+  the route only ever calls get_ltp(symbol) with no token, and the fakes
+  stand in for the whole function, not a passthrough to the real one.
 """
 from __future__ import annotations
 
@@ -31,7 +36,7 @@ def test_get_ltp_success(client: TestClient, monkeypatch: pytest.MonkeyPatch) ->
     def fake_get_ltp(symbol: str) -> dict:
         return {"price": 1234.5, "timestamp": 1_700_000_000.0}
 
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp", fake_get_ltp)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp", fake_get_ltp)
 
     resp = client.get("/api/ltp/RELIANCE")
 
@@ -49,7 +54,7 @@ def test_get_ltp_uppercases_symbol(client: TestClient, monkeypatch: pytest.Monke
         captured["symbol"] = symbol
         return {"price": 100.0, "timestamp": 1.0}
 
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp", fake_get_ltp)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp", fake_get_ltp)
 
     resp = client.get("/api/ltp/reliance")
 
@@ -63,12 +68,12 @@ def test_get_ltp_502_when_client_raises_request_error(
 ) -> None:
     """502, not 404 — per docs/api.md: symbol may be valid, live lookup
     unavailable."""
-    from app.data.kotak_neo_client import KotakNeoRequestError
+    from app.data.angel_one_client import AngelOneRequestError
 
     def fake_get_ltp(symbol: str):
-        raise KotakNeoRequestError(f"Kotak Neo LTP fetch failed for {symbol}: timeout")
+        raise AngelOneRequestError(f"Angel One LTP fetch failed for {symbol}: timeout")
 
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp", fake_get_ltp)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp", fake_get_ltp)
 
     resp = client.get("/api/ltp/RELIANCE")
 
@@ -80,14 +85,14 @@ def test_get_ltp_502_when_client_raises_request_error(
 
 
 def test_get_ltp_502_when_not_configured(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Blank Kotak Neo credentials (KotakNeoNotConfiguredError) must also
+    """Blank Angel One credentials (AngelOneNotConfiguredError) must also
     surface as 502, same as any other live-lookup failure."""
-    from app.data.kotak_neo_client import KotakNeoNotConfiguredError
+    from app.data.angel_one_client import AngelOneNotConfiguredError
 
     def fake_get_ltp(symbol: str):
-        raise KotakNeoNotConfiguredError("Kotak Neo credentials not configured")
+        raise AngelOneNotConfiguredError("Angel One credentials not configured")
 
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp", fake_get_ltp)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp", fake_get_ltp)
 
     resp = client.get("/api/ltp/RELIANCE")
 
@@ -100,7 +105,7 @@ def test_get_ltp_502_when_client_raises_generic_exception(
     def fake_get_ltp(symbol: str):
         raise RuntimeError("unexpected failure")
 
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp", fake_get_ltp)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp", fake_get_ltp)
 
     resp = client.get("/api/ltp/RELIANCE")
 
@@ -113,7 +118,7 @@ def test_get_ltp_502_error_body_does_not_leak_internal_details(
     def fake_get_ltp(symbol: str):
         raise RuntimeError("super secret internal stack trace / password=hunter2")
 
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp", fake_get_ltp)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp", fake_get_ltp)
 
     resp = client.get("/api/ltp/RELIANCE")
 
@@ -131,7 +136,7 @@ def test_get_ltp_502_for_unknown_symbol_still_502_not_404(
     def fake_get_ltp(symbol: str):
         raise RuntimeError(f"no such instrument: {symbol}")
 
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp", fake_get_ltp)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp", fake_get_ltp)
 
     resp = client.get("/api/ltp/NOTAREALSYMBOL")
 
@@ -148,7 +153,7 @@ def test_get_ltp_missing_price_key_in_response_surfaces_as_502(
     def fake_get_ltp(symbol: str) -> dict:
         return {"timestamp": 1.0}  # missing "price"
 
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp", fake_get_ltp)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp", fake_get_ltp)
 
     resp = client.get("/api/ltp/RELIANCE")
 
@@ -161,7 +166,7 @@ def test_get_ltp_symbol_with_special_characters_url_encoded(
     def fake_get_ltp(symbol: str) -> dict:
         return {"price": 10.0, "timestamp": 1.0}
 
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp", fake_get_ltp)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp", fake_get_ltp)
 
     resp = client.get("/api/ltp/M%26M")  # M&M, URL-encoded
 
@@ -173,7 +178,7 @@ def test_get_ltp_response_shape(client: TestClient, monkeypatch: pytest.MonkeyPa
     def fake_get_ltp(symbol: str) -> dict:
         return {"price": 55.5, "timestamp": 42.0}
 
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp", fake_get_ltp)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp", fake_get_ltp)
 
     resp = client.get("/api/ltp/INFY")
 

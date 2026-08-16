@@ -4,7 +4,7 @@ Status: design — not yet implemented. This documents the agreed architecture f
 
 ## Scope of v1
 
-[engine.md](engine.md) produces daily-bar backtest data for two setup types — breakout and dip-buy — plus live current-price lookup via Kotak Neo (display-only, see [engine.md](engine.md#live-data-kotak-neo)). No intraday candles, no live signal detection, no news yet — so v1 of the frontend is **not** the full live intraday scanner from section 40 (that's gated on the candle-builder/VWAP/ORB engines not existing yet, see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning), not on budget anymore).
+[engine.md](engine.md) produces daily-bar backtest data for two setup types — breakout and dip-buy — plus live current-price lookup via Angel One SmartAPI (display-only, see [engine.md](engine.md#live-data-angel-one)). No intraday candles, no live signal detection, no news yet — so v1 of the frontend is **not** the full live intraday scanner from section 40 (that's gated on the candle-builder/VWAP/ORB engines not existing yet, see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning), not on budget anymore).
 
 v1 has **two pages**:
 
@@ -114,12 +114,13 @@ These are named and scoped now so v1's directory layout doesn't need restructuri
 
 Per [backend.md](backend.md), the backend is a Python/FastAPI service; the frontend talks to it as follows:
 
-- **v1: REST polling for everything, including LTP.** The frontend calls REST endpoints (`GET /api/calls`, `GET /api/ltp/:symbol`, `GET /api/backtests`, etc.) via `fetch`. `CallsPage` polls `/api/calls` on a coarse interval (e.g. 60s, matching the backend's LTP cache TTL per api.md) — this is polling a REST endpoint that itself does a live Kotak Neo lookup server-side, not a client-side WebSocket to Kotak Neo. Backtest results are static once a run completes, so `BacktestResultsPage` only needs polling for "is a new run available," or a manual refresh button.
+- **v1: REST polling for everything, including LTP.** The frontend calls REST endpoints (`GET /api/calls`, `GET /api/ltp/:symbol`, `GET /api/backtests`, etc.) via `fetch`. `CallsPage` polls `/api/calls` on a coarse interval (e.g. 60s, matching the backend's LTP cache TTL per api.md) — this is polling a REST endpoint that itself does a live Angel One SmartAPI lookup server-side, not a client-side WebSocket to Angel One. Backtest results are static once a run completes, so `BacktestResultsPage` only needs polling for "is a new run available," or a manual refresh button.
 - **Future: WebSocket for tick-level updates.** Once the candle-builder/live-detection engines exist (per [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning)), `BreakoutWatchlist` and `ChartPanel` (section 40 layout) will need push updates rather than polling — a WebSocket connection from FastAPI is the natural upgrade path. Not implemented now; REST polling would be too slow for tick-level updates, so this is explicitly deferred rather than half-built. Note this is a separate need from `CallsPage`'s LTP polling above, which is adequately served by REST at a 60s cadence since v1 calls are daily-bar-generated, not tick-reactive.
 
 ## Known v1 limitations
 
 - LTP is polled REST, not streamed — adequate for daily-bar-generated calls, not for a tick-reactive live scanner (that's the Future work section, separately gated).
+- LTP can come back `null` for a symbol that has no Angel One `symbol_token` supplied yet — v1 has no scrip-master lookup to resolve tickers to Angel One's instrument tokens automatically (see [engine.md](engine.md#live-data-angel-one)); `CallCard` should treat this the same as any other LTP-unavailable case.
 - `confidence` is the deterministic scoring engine's output, not a trained ML model — see [Confidence model](#confidence-model-v1-vs-future).
 - No news panel — no news source exists yet (engine.md).
 - `DashboardPage` and the `dashboard/` components are placeholders, not wired to real data.

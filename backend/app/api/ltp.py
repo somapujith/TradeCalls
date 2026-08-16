@@ -14,15 +14,22 @@ router = APIRouter(prefix="/api/ltp", tags=["ltp"])
 
 
 def _fetch_ltp(symbol: str) -> LtpResponse:
-    """Calls kotak_neo_client.get_ltp(symbol), which raises
-    KotakNeoNotConfiguredError/KotakNeoRequestError on failure and returns a
+    """Calls angel_one_client.get_ltp(symbol), which raises
+    AngelOneNotConfiguredError/AngelOneRequestError on failure and returns a
     {"price": float, "timestamp": float} dict on success (see
-    app/data/kotak_neo_client.py) — symbol isn't part of that dict since the
+    app/data/angel_one_client.py) — symbol isn't part of that dict since the
     client is keyed by symbol per-call, so it's threaded through here.
-    """
-    from app.data import kotak_neo_client as kotak_neo_module
 
-    quote = kotak_neo_module.get_ltp(symbol)
+    Angel One's ltpData needs a numeric symbol_token alongside the trading
+    symbol, and there's no scrip-master lookup wired in yet (see
+    angel_one_client's module docstring) — until that exists, this always
+    raises AngelOneRequestError via the client's own missing-token check,
+    which the route below correctly surfaces as 502 (lookup unavailable),
+    not a symbol-doesn't-exist error.
+    """
+    from app.data import angel_one_client as angel_one_module
+
+    quote = angel_one_module.get_ltp(symbol)
     return LtpResponse(symbol=symbol, price=quote["price"], timestamp=quote["timestamp"])
 
 

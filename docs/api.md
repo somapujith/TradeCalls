@@ -4,7 +4,7 @@ Status: design — not yet implemented. Documents the planned REST surface of th
 
 ## Scope of v1
 
-The daily-bar backtest engine covers two setup types — breakout and dip-buy (see [engine.md](engine.md#setup-types)) — no news engine, no Telegram integration (see [engine.md](engine.md#known-v1-limitations)). Live *signal detection* (intraday candles, VWAP, ORB) is deferred, not permanently out of scope — Kotak Neo's free WebSocket feed removed the earlier budget blocker, but the engine work to use it doesn't exist yet (see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning)). Live *price display* (LTP) is in scope now via Kotak Neo, display-only, not feeding any engine (see [engine.md](engine.md#live-data-kotak-neo)). API v1 exposes read access to [db.md](db.md)'s v1 tables — backtest runs, their aggregated metrics, the trade setups/outcomes that make up a run, the computed universe/indicators used to generate them — plus current-price lookup. Anything tied to live signal detection, alerts, or news is out of scope for v1 — see [Future / v2](#future--v2-not-part-of-v1) below.
+The daily-bar backtest engine covers two setup types — breakout and dip-buy (see [engine.md](engine.md#setup-types)) — no news engine, no Telegram integration (see [engine.md](engine.md#known-v1-limitations)). Live *signal detection* (intraday candles, VWAP, ORB) is deferred, not permanently out of scope — Angel One SmartAPI's WebSocket feed would likely remove the earlier budget blocker (unverified, see [engine.md](engine.md#live-data-angel-one)), but the engine work to use it doesn't exist yet (see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning)). Live *price display* (LTP) is in scope now via Angel One SmartAPI, display-only, not feeding any engine (see [engine.md](engine.md#live-data-angel-one)) — though v1's LTP lookup requires a manually-supplied `symbol_token` since no scrip-master lookup exists yet (see below). API v1 exposes read access to [db.md](db.md)'s v1 tables — backtest runs, their aggregated metrics, the trade setups/outcomes that make up a run, the computed universe/indicators used to generate them — plus current-price lookup. Anything tied to live signal detection, alerts, or news is out of scope for v1 — see [Future / v2](#future--v2-not-part-of-v1) below.
 
 ## Conventions
 
@@ -23,8 +23,8 @@ The daily-bar backtest engine covers two setup types — breakout and dip-buy (s
 | `GET /api/backtests/{strategy_version}/trades` | Trade setups + outcomes for one run | `trade_setups` join `trade_outcomes` |
 | `GET /api/universe` | Current liquidity-filtered universe | `stocks` + `daily_ohlcv` (computed, not stored) |
 | `GET /api/stocks/{symbol}/indicators` | Indicator history for a symbol | `technical_indicators` |
-| `GET /api/calls` | Active buy calls for the dashboard — symbol, LTP, reason, confidence | `trade_setups` (non-terminal) + `breakout_events` + live `kotak_neo_client` LTP |
-| `GET /api/ltp/{symbol}` | Current price for one symbol | `kotak_neo_client.py` (see engine.md#live-data-kotak-neo), not a stored table |
+| `GET /api/calls` | Active buy calls for the dashboard — symbol, LTP, reason, confidence | `trade_setups` (non-terminal) + `breakout_events` + live `angel_one_client` LTP |
+| `GET /api/ltp/{symbol}` | Current price for one symbol | `angel_one_client.py` (see engine.md#live-data-angel-one), not a stored table |
 
 ### `GET /api/backtests`
 List known backtest runs, one row per distinct `strategy_version` present in `backtest_results`.
@@ -48,14 +48,14 @@ Supports `?symbol=`, `?score_min=`, and `?setup_type=` filters given `trade_setu
 ### `GET /api/calls`
 The dashboard's primary view — active (non-terminal-state) buy calls, i.e. `trade_setups` rows whose `breakout_events` state is not one of `TARGET_HIT`/`INVALIDATED`/`SESSION_END`, from the **latest** `strategy_version` (this endpoint intentionally does not take a `strategy_version` path param — it always reflects the current production run, unlike the backtest-comparison endpoints above which are explicitly per-version).
 
-Response (array): `symbol`, `setup_type` (`BREAKOUT`/`DIP_BUY`), `state` (current state-machine value, e.g. `CONFIRMED`/`RETEST_PENDING`/`TRADE_ACTIVE`), `entry_price`, `stop_loss`, `targets`, `confidence` (the setup's `score`, 0-100 — see [engine.md's Scoring](engine.md#scoring); v1 confidence *is* this score, not a separately-trained model, see [Future / v2](#future--v2-not-part-of-v1)), `reason` (a short structured breakdown of which score components fired — e.g. which of resistance-breakout/RVOL/candle-quality/trend/retest/relative-strength/market/sector contributed, not free text from an LLM since no LLM exists in v1), `ltp` (from `kotak_neo_client`, `null` if the live lookup fails — a stale/missing LTP must not block the call from showing, since the call itself comes from yesterday's close, not from LTP).
+Response (array): `symbol`, `setup_type` (`BREAKOUT`/`DIP_BUY`), `state` (current state-machine value, e.g. `CONFIRMED`/`RETEST_PENDING`/`TRADE_ACTIVE`), `entry_price`, `stop_loss`, `targets`, `confidence` (the setup's `score`, 0-100 — see [engine.md's Scoring](engine.md#scoring); v1 confidence *is* this score, not a separately-trained model, see [Future / v2](#future--v2-not-part-of-v1)), `reason` (a short structured breakdown of which score components fired — e.g. which of resistance-breakout/RVOL/candle-quality/trend/retest/relative-strength/market/sector contributed, not free text from an LLM since no LLM exists in v1), `ltp` (from `angel_one_client`, `null` if the live lookup fails — a stale/missing LTP must not block the call from showing, since the call itself comes from yesterday's close, not from LTP; also `null` when no `symbol_token` is available for the symbol yet, per the known v1 limitation below).
 
-`ltp` is fetched live per request (or from a short-TTL cache, e.g. 60s, to avoid hammering Kotak Neo on every dashboard poll) — it is not stored in `trade_setups`, which stays a pure historical/backtest table per db.md.
+`ltp` is fetched live per request (or from a short-TTL cache, e.g. 60s, to avoid hammering Angel One's API on every dashboard poll) — it is not stored in `trade_setups`, which stays a pure historical/backtest table per db.md.
 
 ### `GET /api/ltp/{symbol}`
-Current price for one symbol via `kotak_neo_client.get_ltp()`. Used by the frontend to refresh price independently of the full `/api/calls` payload (e.g. a per-row refresh button).
+Current price for one symbol via `angel_one_client.get_ltp()`. Used by the frontend to refresh price independently of the full `/api/calls` payload (e.g. a per-row refresh button).
 
-Response: `symbol`, `price`, `timestamp`. 502 (not 404) if the Kotak Neo session/API call fails — the symbol may be valid but the live lookup unavailable; the frontend should treat this as "LTP unavailable," not "symbol doesn't exist."
+Response: `symbol`, `price`, `timestamp`. 502 (not 404) if the Angel One session/API call fails — the symbol may be valid but the live lookup unavailable; the frontend should treat this as "LTP unavailable," not "symbol doesn't exist." This also fires if no `symbol_token` is supplied/resolvable for the symbol: v1 has no scrip-master lookup yet (see [engine.md](engine.md#live-data-angel-one)), so `angel_one_client.get_ltp` raises rather than guessing a token.
 
 ### `GET /api/universe`
 Browse the liquidity-filtered universe as `universe.py` would compute it (price > ₹50, 20D avg turnover > ₹10Cr, excludes illiquid/suspended) — **computed on request from `stocks` + `daily_ohlcv`, not a stored table** (db.md has no universe snapshot table in v1).
@@ -81,7 +81,7 @@ Response (array, one row per date): `date`, `ema9`, `ema20`, `ema50`, `sma100`, 
 
 The following are explicitly **out of scope** for this API until the underlying engine components exist (see engine.md's "Known v1 limitations" and db.md's "Deferred tables"):
 
-- Live scanning / real-time breakout signal *detection* (Kotak Neo's WebSocket feed is available, but the candle-builder/VWAP/ORB engines it would feed aren't built — see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning); LTP *display* is already in v1 via `/api/ltp` and `/api/calls`, this bullet is about detection, not price)
+- Live scanning / real-time breakout signal *detection* (Angel One SmartAPI's WebSocket feed may be available — unverified, see [engine.md](engine.md#live-data-angel-one) — but the candle-builder/VWAP/ORB engines and a scrip-master token lookup it would feed aren't built — see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning); LTP *display* is already in v1 via `/api/ltp` and `/api/calls`, this bullet is about detection, not price)
 - WebSocket or polling endpoints over `market_ticks`, `candles_1m/5m/15m` (deferred tables, no candle-builder yet)
 - Telegram alert delivery or `telegram_alerts` history (no Telegram integration yet)
 - News/catalyst endpoints over `news`, `corporate_announcements` (no news engine yet)

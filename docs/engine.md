@@ -6,30 +6,32 @@ Status: design — not yet implemented. This documents the agreed architecture f
 
 **Hard rule: every component in this system must be free.** No paid data feeds, no paid brokers, no paid hosting, no paid APIs.
 
-This no longer rules out live/intraday capability — see [Live Data: Kotak Neo](#live-data-kotak-neo) below. **Kotak Neo's Trade API is free** (no subscription, ₹0 brokerage on API orders) and its official Python SDK (`neo_api_client`) supports WebSocket live price/order feeds in addition to REST quotes — confirmed via Kotak Neo's own docs/bulletins and the SDK's `on_message`/`subscribe` interface. This replaces the earlier assumption that any live feed necessarily costs money (that assumption held for Zerodha Kite Connect ₹2000/mo, which is why intraday was dropped in the original version of this doc — it does not hold for Kotak Neo).
+This no longer rules out live/intraday capability — see [Live Data: Angel One](#live-data-angel-one) below. **Angel One's SmartAPI is free** (no subscription, ₹0 brokerage on API orders) and its official Python SDK (`smartapi-python`) supports a WebSocket live price/order feed in addition to REST quotes — Angel One likely offers this WebSocket feed on the same free terms as the REST API (unverified against a live account at documentation time; verify against SmartAPI's own docs/bulletins before relying on it). This replaces the earlier assumption that any live feed necessarily costs money (that assumption held for Zerodha Kite Connect ₹2000/mo, which is why intraday was dropped in the original version of this doc — it does not hold for Angel One SmartAPI).
 
-Requires a Kotak Neo trading/demat account (opening one is free; standard KYC applies) and generating an API key from the Neo app/portal — this is an account-linked API, not an anonymous public one, so it identifies as this user's broker account. Exact auth flow (key/secret/session token, possibly TOTP) and rate limits are not fully documented publicly as of this writing — verify against the live SDK/docs at implementation time rather than assuming the details below are exhaustive.
+Requires an Angel One trading/demat account (opening one is free; standard KYC applies) and generating an API key from the SmartAPI developer portal (smartapi.angelone.in). This is an account-linked API, not an anonymous public one, so it identifies as this user's broker account. Auth is two-factor: the account's MPIN plus a rotating TOTP code computed from a base32 secret issued once when TOTP 2FA is enabled on the SmartAPI portal (the `pyotp` package computes the current code at login time) — see `app/data/angel_one_client.py`'s module docstring for the exact `generateSession(client_code, mpin, totp)` call shape. Rate limits are not fully documented publicly as of this writing — verify against the live SDK/docs at implementation time rather than assuming the details below are exhaustive.
 
 NSE official data (announcements, filings, corporate actions) still has no free *official* API. Where used, it goes through unofficial free wrapper libraries (e.g. `nsepython`/`nsetools`-style scrapers of NSE's public site) — free but grey-area against NSE's terms of use, and fragile. Treat this layer as best-effort context, not a dependable data source.
 
 ## Scope of v1
 
-Daily bars only. yfinance ingestion (free, no API key). No VWAP/ORB/RVOL-by-time-bucket in v1 — these need intraday bars, which is now a live-data capability (see [Live Data: Kotak Neo](#live-data-kotak-neo)) but not yet wired into the breakout/dip-buy engines; that's the v-next slice, kept separate from v1's daily-bar backtest baseline so the already-designed no-look-ahead backtest machinery isn't disturbed. No news engine yet — news catalyst scoring component defaults to 0 until a free news source is wired in (candidate: free RSS feeds + unofficial NSE announcement scraping).
+Daily bars only. yfinance ingestion (free, no API key). No VWAP/ORB/RVOL-by-time-bucket in v1 — these need intraday bars, which is now a live-data capability (see [Live Data: Angel One](#live-data-angel-one)) but not yet wired into the breakout/dip-buy engines; that's the v-next slice, kept separate from v1's daily-bar backtest baseline so the already-designed no-look-ahead backtest machinery isn't disturbed. No news engine yet — news catalyst scoring component defaults to 0 until a free news source is wired in (candidate: free RSS feeds + unofficial NSE announcement scraping).
 
 v1 covers **two setup types**, not just breakout — see [Dip-Buy Setup](#dip-buy-setup) below. Both are designed daily-bar-first; the live-data layer below extends them with a current-price overlay now, and is the foundation for a future live-scanning mode once the daily-bar version has backtested track record.
 
-## Live Data: Kotak Neo
+## Live Data: Angel One
 
 Free broker API used for **current price display** in v1 (see [frontend.md](frontend.md)) and reserved as the foundation for live intraday scanning in a later version. Two distinct capabilities, intentionally not conflated:
 
 | Capability | v1 usage | Data flow |
 |---|---|---|
-| REST quote (LTP/OHLC) | On-demand or polled (e.g. once per minute while dashboard is open) to show current price next to each open call | `data/kotak_neo_client.py` → dashboard, does **not** feed the breakout/dip-buy engines |
-| WebSocket live tick feed | Not used in v1 | Reserved for v-next live scanner — see [Future: Live Intraday Scanning](#future-live-intraday-scanning) |
+| REST quote (`ltpData`) | On-demand or polled (e.g. once per minute while dashboard is open) to show current price next to each open call | `data/angel_one_client.py` → dashboard, does **not** feed the breakout/dip-buy engines |
+| WebSocket live tick feed | Not used in v1 | Angel One likely offers a WebSocket feed alongside SmartAPI's REST quotes (unverified — not confirmed against a live account); if so, reserved for v-next live scanner — see [Future: Live Intraday Scanning](#future-live-intraday-scanning) |
 
-This split matters: v1's breakout/dip-buy detection and backtesting stay entirely on yfinance daily bars — deterministic, already-designed, reproducible via `strategy_version`. Kotak Neo's LTP is a **display-only overlay** in v1 — it shows what the price is doing right now next to a call that was generated from yesterday's close, it does not change the call itself. Wiring live ticks into the detection engines is new work (see Future section) and should not be assumed to work simply because the data is now available for free.
+This split matters: v1's breakout/dip-buy detection and backtesting stay entirely on yfinance daily bars — deterministic, already-designed, reproducible via `strategy_version`. Angel One's LTP is a **display-only overlay** in v1 — it shows what the price is doing right now next to a call that was generated from yesterday's close, it does not change the call itself. Wiring live ticks into the detection engines is new work (see Future section) and should not be assumed to work simply because the data is now available for free.
 
-`data/kotak_neo_client.py` module: wraps `neo_api_client`, handles login/session, exposes `get_ltp(symbol) -> {price, timestamp}`. Session/auth details (API key storage, TOTP if required) go in `config.py` per [backend.md](backend.md), never hardcoded.
+`data/angel_one_client.py` module: wraps `smartapi-python`'s `SmartConnect`, handles login/session (two-factor: MPIN + TOTP, see Zero-Budget Constraint above), exposes `get_ltp(symbol, exchange, symbol_token) -> {price, timestamp}`. Credentials (`angel_one_api_key`/`angel_one_client_code`/`angel_one_mpin`/`angel_one_totp_secret`) go in `config.py` per [backend.md](backend.md), never hardcoded.
+
+**Known v1 limitation**: Angel One's `ltpData` call is keyed by exchange + a numeric `symboltoken`, not a bare NSE ticker — there is no scrip-master lookup wired in yet to resolve a symbol like `RELIANCE` to its Angel One instrument token. `get_ltp` therefore requires the caller to supply `symbol_token` explicitly and raises `AngelOneRequestError` if it's omitted, rather than guessing (a wrong token would silently quote the wrong instrument). Building a lookup against Angel One's published scrip master JSON is future work, not yet done.
 
 ## Modules
 
@@ -165,18 +167,20 @@ Every `backtest_results` row is tagged with a `strategy_version` string (a short
 
 ## Future: Live Intraday Scanning
 
-Not built in v1. Documented now because Kotak Neo's free WebSocket feed makes it possible under the zero-budget constraint (unlike the originally-assumed paid-broker blocker) — but it is meaningfully new engineering, not a config flag on top of v1:
+Not built in v1. Documented now because Angel One SmartAPI's likely-free WebSocket feed (unverified, see [Live Data: Angel One](#live-data-angel-one) above) would make it possible under the zero-budget constraint (unlike the originally-assumed paid-broker blocker) — but it is meaningfully new engineering, not a config flag on top of v1:
 
 - A new candle-builder (tick → 1m/5m/15m candles) reintroducing the deferred `market_ticks`/`candles_1m/5m/15m` tables from [db.md](db.md) — currently marked budget-blocked there and would need to move to "planned."
 - VWAP, ORB, and RVOL-by-time-bucket engines from the original planning doc (sections 21-22), none of which exist yet even as daily-bar approximations.
 - The breakout/dip-buy state machines would need an intraday-aware variant, since the current design's no-look-ahead guarantee and bar-history slicing are built around one-bar-per-day granularity.
-- Kotak Neo's WebSocket connection needs to run inside a long-lived process during market hours — a different runtime shape than the current EOD-batch APScheduler design in [backend.md](backend.md).
+- A scrip-master lookup to resolve bare NSE tickers to Angel One's numeric `symboltoken`s (see the known v1 limitation in [Live Data: Angel One](#live-data-angel-one)) — needed at scale for any live scanner, not just the current single-symbol LTP overlay.
+- Angel One's WebSocket connection (if confirmed available) would need to run inside a long-lived process during market hours — a different runtime shape than the current EOD-batch APScheduler design in [backend.md](backend.md).
 
-**Recommended sequencing**: prove the daily-bar breakout/dip-buy engines with real backtest results first (v1-v3 per the build order below), *then* layer live scanning on top once there's confidence in the underlying signal logic — adding live data to an unvalidated strategy doesn't make the strategy better, it just makes losses happen faster. Live LTP display (already in v1, see above) is the only Kotak Neo integration point until that validation exists.
+**Recommended sequencing**: prove the daily-bar breakout/dip-buy engines with real backtest results first (v1-v3 per the build order below), *then* layer live scanning on top once there's confidence in the underlying signal logic — adding live data to an unvalidated strategy doesn't make the strategy better, it just makes losses happen faster. Live LTP display (already in v1, see above) is the only Angel One integration point until that validation exists.
 
 ## Known v1 limitations (carried forward from gap analysis)
 
-- Daily bars only for signal detection — no intraday confirmation (VWAP, ORB, RVOL-by-time-bucket) yet; see [Future: Live Intraday Scanning](#future-live-intraday-scanning). Current price display *is* live (Kotak Neo), the detection logic is not.
+- Daily bars only for signal detection — no intraday confirmation (VWAP, ORB, RVOL-by-time-bucket) yet; see [Future: Live Intraday Scanning](#future-live-intraday-scanning). Current price display *is* live (Angel One SmartAPI), the detection logic is not.
+- Angel One LTP lookup requires a `symbol_token` the caller must supply manually — no scrip-master symbol-to-token lookup exists yet (see [Live Data: Angel One](#live-data-angel-one)).
 - No news catalyst scoring (news engine not built yet)
 - No walk-forward weight optimization — that's a separate follow-up spec, not in this slice
 - No portfolio-level risk (correlation between simultaneous signals, max concurrent positions) — v1 backtests each signal independently

@@ -30,12 +30,11 @@ class Settings(BaseSettings):
     yfinance_max_retries: int = 3
     yfinance_backoff_seconds: float = 2.0
 
-    # Kotak Neo (free, LTP display only — docs/engine.md#live-data-kotak-neo)
-    kotak_neo_consumer_key: str = ""
-    kotak_neo_consumer_secret: str = ""
-    kotak_neo_mobile_number: str = ""
-    kotak_neo_password: str = ""
-    kotak_neo_mpin: str = ""
+    # Angel One SmartAPI (free, LTP display only — docs/engine.md#live-data-angel-one)
+    angel_one_api_key: str = ""
+    angel_one_client_code: str = ""
+    angel_one_mpin: str = ""  # SmartAPI's generateSession takes MPIN in the password slot for MPIN-only accounts
+    angel_one_totp_secret: str = ""  # base32 TOTP seed from SmartAPI portal 2FA setup
 
     # LTP cache TTL (seconds) — see docs/api.md GET /api/calls
     ltp_cache_ttl_seconds: int = 60

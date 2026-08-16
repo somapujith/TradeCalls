@@ -4,7 +4,7 @@ Status: design — not yet implemented. This documents the FastAPI/scheduler lay
 
 ## Scope of v1
 
-The backend is a thin host for the daily-bar backtest engine — a serving layer plus a scheduler that runs the engine's modules in order, for **both** setup types (breakout and dip-buy, see [engine.md](engine.md#setup-types)) — plus a live LTP lookup via Kotak Neo for dashboard display (see [engine.md](engine.md#live-data-kotak-neo)). It does not do live/intraday *signal detection* yet (deferred, not permanently blocked — see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning)), does not run an LLM/SLM, and does not send alerts; SLM/LLM/Telegram are v2+ (see Future work below), and remain free-tier/local-only when built (LM Studio runs local models at no cost; Telegram Bot API is free).
+The backend is a thin host for the daily-bar backtest engine — a serving layer plus a scheduler that runs the engine's modules in order, for **both** setup types (breakout and dip-buy, see [engine.md](engine.md#setup-types)) — plus a live LTP lookup via Angel One SmartAPI for dashboard display (see [engine.md](engine.md#live-data-angel-one)). It does not do live/intraday *signal detection* yet (deferred, not permanently blocked — see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning)), does not run an LLM/SLM, and does not send alerts; SLM/LLM/Telegram are v2+ (see Future work below), and remain free-tier/local-only when built (LM Studio runs local models at no cost; Telegram Bot API is free).
 
 ## Directory structure
 
@@ -18,7 +18,7 @@ backend/
     data/
       yfinance_client.py — daily OHLCV per symbol, adjusted close (see engine.md)
       universe.py          — liquidity filter (see engine.md)
-      kotak_neo_client.py  — live LTP for dashboard display only, not fed into engines (see engine.md#live-data-kotak-neo)
+      angel_one_client.py  — live LTP for dashboard display only, not fed into engines (see engine.md#live-data-angel-one)
 
     market/
       indicators.py        — EMA/SMA/RSI/MACD/ATR/Bollinger (see engine.md)
@@ -59,7 +59,7 @@ Indicative v1 endpoint shape (illustrative, not a committed contract):
 | `/trade-setups/{symbol}` | GET | Entry/SL/targets/score history for a symbol |
 | `/backtest-results?strategy_version=...` | GET | Aggregated metrics for a given `strategy_version` (see engine.md Reproducibility) |
 | `/backtest-runs` | POST | Trigger a new `backtest/simulator.py` run as a background task; response includes the `strategy_version` it will be tagged with |
-| `/ltp/{symbol}` | GET | Current price via `kotak_neo_client.py` (see engine.md#live-data-kotak-neo) — display-only, not used by any engine logic |
+| `/ltp/{symbol}` | GET | Current price via `angel_one_client.py` (see engine.md#live-data-angel-one) — display-only, not used by any engine logic |
 
 ## config.py
 
@@ -72,7 +72,7 @@ Pydantic-based settings (per planning doc [section 47](../AI_Intraday_Breakout_R
 | Cost model | slippage bps, brokerage, STT rate |
 | Scheduler | job cadence, timezone |
 | Data client | yfinance retry/backoff, request rate limit |
-| Kotak Neo | API key/secret, session credentials — never hardcoded, loaded from `.env` (see engine.md#live-data-kotak-neo) |
+| Angel One | `angel_one_api_key`/`angel_one_client_code`/`angel_one_mpin`/`angel_one_totp_secret` — never hardcoded, loaded from `.env` (see engine.md#live-data-angel-one) |
 
 ## Scheduler (APScheduler)
 
@@ -85,7 +85,7 @@ v1 is an offline batch system — there is no market open to scan intraday yet, 
 | Breakout state advance | Immediately after derived data refresh | `breakout/breakout_engine.py` advances each symbol's state on the new bar; `breakout/scoring.py` scores CONFIRMED signals; new `trade_setups` rows persisted |
 | Backtest run | On-demand via the FastAPI trigger endpoint, not cron | `backtest/simulator.py` replays a date range for strategy tuning/comparison — not part of the daily production path in v1 |
 
-This collapses planning doc [section 45](../AI_Intraday_Breakout_Research_Planning.md#45-suggested-daily-scheduler)'s 08:30–09:00 pre-market block and its 09:15–15:30 live breakout scanner (1-minute candle updates, 5-minute breakout scans, SLM/LLM triggers, Telegram alerts) into a single EOD batch chain, because v1 has no candle-builder, no pre-market data source, and no news engine — a live *price* feed exists (Kotak Neo, used for on-demand LTP only, see engine.md), but nothing in the scheduler consumes it yet. The full intraday timeline in section 45 is the target once the detection engines exist — it is not built here.
+This collapses planning doc [section 45](../AI_Intraday_Breakout_Research_Planning.md#45-suggested-daily-scheduler)'s 08:30–09:00 pre-market block and its 09:15–15:30 live breakout scanner (1-minute candle updates, 5-minute breakout scans, SLM/LLM triggers, Telegram alerts) into a single EOD batch chain, because v1 has no candle-builder, no pre-market data source, and no news engine — a live *price* feed exists (Angel One SmartAPI, used for on-demand LTP only, see engine.md), but nothing in the scheduler consumes it yet. The full intraday timeline in section 45 is the target once the detection engines exist — it is not built here.
 
 Exact trigger times are configurable in `config.py`, not hardcoded, per planning doc section 45's closing note.
 
@@ -102,7 +102,7 @@ Per planning doc [section 47](../AI_Intraday_Breakout_Research_Planning.md#47-re
 
 ## Future work (v2+, out of scope for detail here)
 
-- Live intraday scanner loop (09:15–15:30, per-minute candle/indicator updates, 5-minute breakout scans) — Kotak Neo's WebSocket feed removes the earlier budget blocker, but the candle-builder, VWAP/ORB engines, and a long-lived market-hours process are all unbuilt; see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning) for sequencing (daily-bar engines validate first).
+- Live intraday scanner loop (09:15–15:30, per-minute candle/indicator updates, 5-minute breakout scans) — Angel One SmartAPI's WebSocket feed (if confirmed available, see engine.md's Live Data section) would remove the earlier budget blocker, but the candle-builder, VWAP/ORB engines, a scrip-master token lookup, and a long-lived market-hours process are all unbuilt; see [engine.md's Future: Live Intraday Scanning](engine.md#future-live-intraday-scanning) for sequencing (daily-bar engines validate first).
 - SLM/LLM candidate explanation (`ai/` module, planning doc section 46).
 - Telegram alerting (`notifications/` module).
 - A `trading/` module for live entry/SL/target execution — v1's `breakout_engine.py` already computes these values for backtesting per engine.md, but wiring them to a live/paper-trading path is separate work.

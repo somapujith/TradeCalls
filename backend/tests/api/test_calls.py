@@ -5,7 +5,7 @@ Key contract points under test:
   present in trade_setups (by created_at), unlike the /api/backtests/* endpoints.
 - Only non-terminal-state trade_setups are returned (TARGET_HIT/INVALIDATED/
   SESSION_END/NOT_CONFIRMED excluded per app.breakout.states.TERMINAL_STATES).
-- `ltp` is nullable and a failed/stale Kotak Neo lookup must NOT block the call
+- `ltp` is nullable and a failed/stale Angel One lookup must NOT block the call
   from showing (still 200, ltp: null).
 - `confidence` is the setup's deterministic `score`, not an ML output.
 - `reason` is the parsed score_breakdown JSON (dict), or None if unparseable/null.
@@ -33,7 +33,7 @@ def test_get_calls_returns_non_terminal_setups_from_latest_version(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "app.data.kotak_neo_client.get_ltp_safe", lambda symbol: {"price": 501.5, "timestamp": 123.0}
+        "app.data.angel_one_client.get_ltp_safe", lambda symbol: {"price": 501.5, "timestamp": 123.0}
     )
 
     stock = make_stock(db_session, symbol="RELIANCE")
@@ -58,7 +58,7 @@ def test_get_calls_returns_non_terminal_setups_from_latest_version(
 def test_get_calls_excludes_terminal_states(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch, terminal_state: str
 ) -> None:
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp_safe", lambda symbol: None)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp_safe", lambda symbol: None)
 
     stock = make_stock(db_session, symbol="TCS")
     make_trade_setup(db_session, stock, strategy_version="v1", state=terminal_state)
@@ -72,7 +72,7 @@ def test_get_calls_excludes_terminal_states(
 def test_get_calls_includes_non_terminal_states(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp_safe", lambda symbol: None)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp_safe", lambda symbol: None)
 
     stock = make_stock(db_session, symbol="INFY")
     for state in ["CONFIRMED", "RETEST_PENDING", "TRADE_ACTIVE"]:
@@ -91,7 +91,7 @@ def test_get_calls_only_uses_latest_strategy_version(
     """Older strategy_version rows must not leak into /api/calls even if they
     are non-terminal — the endpoint always reflects the current production run.
     """
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp_safe", lambda symbol: None)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp_safe", lambda symbol: None)
 
     stock = make_stock(db_session, symbol="HDFCBANK")
     old_time = datetime.utcnow() - timedelta(days=5)
@@ -112,7 +112,7 @@ def test_get_calls_only_uses_latest_strategy_version(
     assert body[0]["confidence"] == 10.0
 
 
-def test_get_calls_ltp_null_when_kotak_lookup_fails(
+def test_get_calls_ltp_null_when_angel_one_lookup_fails(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failed/unavailable live LTP lookup must not block the call from
@@ -121,9 +121,9 @@ def test_get_calls_ltp_null_when_kotak_lookup_fails(
     """
 
     def _raise(symbol: str) -> dict | None:
-        raise RuntimeError("Kotak Neo session expired")
+        raise RuntimeError("Angel One session expired")
 
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp_safe", _raise)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp_safe", _raise)
 
     stock = make_stock(db_session, symbol="WIPRO")
     make_trade_setup(db_session, stock, strategy_version="v1", state="CONFIRMED")
@@ -136,10 +136,10 @@ def test_get_calls_ltp_null_when_kotak_lookup_fails(
     assert body[0]["ltp"] is None
 
 
-def test_get_calls_ltp_null_when_kotak_returns_none(
+def test_get_calls_ltp_null_when_angel_one_returns_none(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp_safe", lambda symbol: None)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp_safe", lambda symbol: None)
 
     stock = make_stock(db_session, symbol="ITC")
     make_trade_setup(db_session, stock, strategy_version="v1", state="CONFIRMED")
@@ -153,7 +153,7 @@ def test_get_calls_ltp_null_when_kotak_returns_none(
 def test_get_calls_ordered_by_score_descending(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp_safe", lambda symbol: None)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp_safe", lambda symbol: None)
 
     stock_a = make_stock(db_session, symbol="AAA")
     stock_b = make_stock(db_session, symbol="BBB")
@@ -172,7 +172,7 @@ def test_get_calls_ordered_by_score_descending(
 def test_get_calls_reason_null_when_score_breakdown_is_null(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp_safe", lambda symbol: None)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp_safe", lambda symbol: None)
 
     stock = make_stock(db_session, symbol="LT")
     make_trade_setup(db_session, stock, strategy_version="v1", state="CONFIRMED", score_breakdown=None)
@@ -186,7 +186,7 @@ def test_get_calls_reason_null_when_score_breakdown_is_null(
 def test_get_calls_reason_null_when_score_breakdown_is_invalid_json(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp_safe", lambda symbol: None)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp_safe", lambda symbol: None)
 
     stock = make_stock(db_session, symbol="AXISBANK")
     make_trade_setup(db_session, stock, strategy_version="v1", state="CONFIRMED", score_breakdown="not-json{")
@@ -202,7 +202,7 @@ def test_get_calls_entry_price_nullable(
 ) -> None:
     """entry_price is nullable per schema (a CONFIRMED setup may not have
     triggered an entry yet)."""
-    monkeypatch.setattr("app.data.kotak_neo_client.get_ltp_safe", lambda symbol: None)
+    monkeypatch.setattr("app.data.angel_one_client.get_ltp_safe", lambda symbol: None)
 
     stock = make_stock(db_session, symbol="SBIN")
     make_trade_setup(db_session, stock, strategy_version="v1", state="CONFIRMED", entry_price=None)
