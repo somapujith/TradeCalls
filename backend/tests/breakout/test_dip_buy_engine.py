@@ -196,9 +196,10 @@ def test_pullback_in_progress_no_look_ahead(bars_factory):
 
 
 def test_support_test_closed_below_support_not_confirmed(bars_factory):
-    # close(92.5) well below support(95.0) by more than SUPPORT_TOLERANCE_PCT
+    # close(90.0) well below support(95.0) by more than SUPPORT_TOLERANCE_PCT
+    # (3.0% as of 2026-08-17's loosened thresholds — see dip_buy_engine.py)
     rows = [_bar_row(95, 96, 94, 95.3) for _ in range(2)]
-    rows.append(_bar_row(94, 94.5, 92, 92.5))
+    rows.append(_bar_row(92, 92.5, 89.5, 90.0))
     bars = bars_factory(rows, start=date(2024, 1, 1))
 
     result = advance_dip_buy_state(DipBuyState.SUPPORT_TEST, bars, [SUPPORT])
@@ -293,9 +294,10 @@ def test_reversal_candle_rvol_confirmed_advances_to_volume_confirmation(bars_fac
 
 
 def test_reversal_candle_min_rvol_is_lower_than_breakout_engine(bars_factory):
-    # dip-buy's RVOL bar (1.3) is documented as lower than breakout's (1.5)
-    # — reversal off a pullback, not a breakout surge.
-    assert MIN_RVOL_CONFIRM == 1.3
+    # dip-buy's RVOL bar (1.1) is documented as lower than breakout's (1.2)
+    # — reversal off a pullback, not a breakout surge. (Both loosened from
+    # 1.3/1.5 on 2026-08-17, relative ordering preserved.)
+    assert MIN_RVOL_CONFIRM == 1.1
 
     rows = [_bar_row(95, 96, 94, 95) for _ in range(20)]
     rows.append(_bar_row(95, 96, 94, 95.5, volume=135_000))  # rvol == 1.35

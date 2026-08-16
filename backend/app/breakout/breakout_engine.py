@@ -26,12 +26,18 @@ from app.market.levels import Level
 
 # Thresholds — kept as module constants for now; promote to config.py if the
 # walk-forward optimization follow-up needs to tune them per docs/engine.md.
-APPROACH_PROXIMITY_PCT = 2.0  # within 2% of resistance triggers APPROACHING
-MIN_RVOL_CONFIRM = 1.5
-MIN_BODY_PCT = 40.0
-MAX_UPPER_WICK_REJECT_PCT = 60.0
-RETEST_TOLERANCE_PCT = 1.5
-RETEST_MAX_BARS = 10
+#
+# Loosened 2026-08-17 per user's explicit volume preference (20-50 calls/day
+# across the full universe) — the original values funneled 77 stocks/1yr
+# down to just 10 CONFIRMED signals total, nowhere near that target. Still
+# real gates (RVOL/candle-quality/wick checks all still apply), just less
+# strict at each rung — not eliminated, per "disciplined not strict rules."
+APPROACH_PROXIMITY_PCT = 4.0  # was 2.0 — within 4% of resistance triggers APPROACHING
+MIN_RVOL_CONFIRM = 1.2  # was 1.5
+MIN_BODY_PCT = 30.0  # was 40.0
+MAX_UPPER_WICK_REJECT_PCT = 70.0  # was 60.0
+RETEST_TOLERANCE_PCT = 2.5  # was 1.5
+RETEST_MAX_BARS = 15  # was 10
 
 
 @dataclass(frozen=True)

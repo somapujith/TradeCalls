@@ -85,7 +85,7 @@ def score_breakout(
     relative_strength_vs_nifty: float | None,
     market_regime: str,
     sector_confirmed: bool,
-    min_rvol: float = 1.5,
+    min_rvol: float = 1.2,  # was 1.5 — synced with breakout_engine.MIN_RVOL_CONFIRM, see that file
 ) -> ScoreResult:
     breakdown: dict[str, float] = {}
 
@@ -123,7 +123,7 @@ def score_dip_buy(
     relative_strength_vs_nifty: float | None,
     market_regime: str,
     sector_confirmed: bool,
-    min_rvol: float = 1.3,
+    min_rvol: float = 1.1,  # was 1.3 — synced with dip_buy_engine.MIN_RVOL_CONFIRM, see that file
 ) -> ScoreResult:
     breakdown: dict[str, float] = {}
 
