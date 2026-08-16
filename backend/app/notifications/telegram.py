@@ -69,31 +69,45 @@ def format_trade_setup_alert(
     tier: str,
     event_caution: str | None = None,
 ) -> str:
-    """Formats per the original planning doc's section 38 alert layout."""
-    label = SETUP_TYPE_LABEL.get(setup_type, setup_type)
+    """Terse "research call" format — user-specified, matched to a
+    reference Telegram channel's style (compact single-block message, not
+    the original doc's boxier section-38 layout): category line, then
+    "<SYMBOL> Looks good above X SL Y" on one line, targets condensed to
+    one comma-separated line rather than one per line."""
+    label = "POSITIONAL RESEARCH"
+    trigger_price = entry_price if entry_price is not None else nearest_structural_target
     targets = [t for t in [nearest_structural_target, target_1r, target_1_5r, target_2r, target_3r] if t is not None]
-    targets_lines = "\n".join(f"₹{t:,.2f}" for t in sorted(set(targets)))
+    targets_line = "  ".join(f"₹{t:,.2f}" for t in sorted(set(targets)))
 
-    lines = [
-        f"🚀 {label}",
-        "",
-        f"<b>{symbol}</b>",
-        "",
-    ]
-    if entry_price is not None:
-        lines.append(f"Entry: ₹{entry_price:,.2f}")
-    lines.append(f"SL: ₹{stop_loss:,.2f}")
+    lines = [label, ""]
+    trigger_text = f"₹{trigger_price:,.2f}" if trigger_price is not None else "current level"
+    lines.append(f"<b>{symbol}</b>  Looks good above {trigger_text}  SL ₹{stop_loss:,.2f}")
     lines.append("")
-    lines.append("🎯 Targets:")
-    lines.append(targets_lines)
-    lines.append("")
-    lines.append(f"Setup Score: {score:.0f}/100 ({tier})")
+    lines.append(f"🎯 Targets: {targets_line}")
+    lines.append(f"Score: {score:.0f}/100 ({tier})")
 
     if event_caution:
-        lines.append("")
         lines.append(f"⚠️ {event_caution}")
 
     return "\n".join(lines)
+
+
+def format_new_high_update(symbol: str, price: float, *, rockets: int = 3) -> str:
+    """Follow-up sent when an open call makes a fresh intraday/since-signal
+    high — "<SYMBOL> made a high of X🚀🚀🚀" per the reference channel
+    style. Caller (the continuous LTP-monitoring loop) decides when a move
+    is significant enough to fire this — this function only formats."""
+    return f"✨<b>{symbol}</b> made a high of ₹{price:,.2f}{'🚀' * rockets}"
+
+
+def format_target_hit_update(symbol: str, entry_price: float, hit_price: float) -> str:
+    """Follow-up sent when a target is hit — narrative style matching the
+    reference channel ("In morning we shared research... today it hit a
+    high of...")."""
+    return (
+        f"✅<b>{symbol}</b> 🔥 - In morning we shared research that it looks good above ₹{entry_price:,.2f}\n\n"
+        f"Today only, it hit a high of ₹{hit_price:,.2f}🎯🎯"
+    )
 
 
 def send_trade_setup_alert(**kwargs) -> bool:

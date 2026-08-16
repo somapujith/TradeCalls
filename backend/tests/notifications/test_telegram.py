@@ -6,6 +6,8 @@ import pytest
 from app.notifications import telegram
 from app.notifications.telegram import (
     TelegramNotConfiguredError,
+    format_new_high_update,
+    format_target_hit_update,
     format_trade_setup_alert,
     send_message,
     send_trade_setup_alert,
@@ -82,9 +84,9 @@ def test_format_trade_setup_alert_includes_key_fields():
     )
 
     assert "LODHA" in text
-    assert "BREAKOUT ALERT" in text
-    assert "1,245.00" in text
-    assert "1,225.00" in text
+    assert "POSITIONAL RESEARCH" in text
+    assert "Looks good above ₹1,245.00" in text
+    assert "SL ₹1,225.00" in text
     assert "88/100 (A)" in text
 
 
@@ -104,8 +106,33 @@ def test_format_trade_setup_alert_includes_event_caution_when_present():
         event_caution="Earnings due within 3 trading days",
     )
 
-    assert "DIP-BUY ALERT" in text
+    assert "INFY" in text
+    assert "Looks good above current level" in text  # no entry_price, no nearest_structural_target
     assert "Earnings due within 3 trading days" in text
+
+
+def test_format_new_high_update_default_rockets():
+    text = format_new_high_update("LODHA", 1252.40)
+
+    assert "LODHA" in text
+    assert "1,252.40" in text
+    assert "made a high of" in text
+    assert text.count("🚀") == 3
+
+
+def test_format_new_high_update_custom_rocket_count():
+    text = format_new_high_update("BDL", 1388.40, rockets=2)
+
+    assert text.count("🚀") == 2
+
+
+def test_format_target_hit_update_includes_entry_and_hit_price():
+    text = format_target_hit_update("ELGI EQUIPMENT", entry_price=610.0, hit_price=619.0)
+
+    assert "ELGI EQUIPMENT" in text
+    assert "610.00" in text
+    assert "619.00" in text
+    assert "🎯🎯" in text
 
 
 def test_send_trade_setup_alert_never_raises_on_missing_config():
