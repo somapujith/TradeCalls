@@ -377,9 +377,16 @@ def test_volume_confirmation_target_ladder_includes_nearest_structural_target(fl
     )
 
     assert result.targets["nearest_structural_target"] == pytest.approx(105.0)
+    # Targets are floored at a minimum % move (see target_ladder.py) — the raw
+    # R-multiple only wins when it already clears that floor, so assert the
+    # max of the two rather than the raw R-multiple formula alone.
     risk = result.entry_price - result.stop_loss
-    assert result.targets["target_1r"] == pytest.approx(result.entry_price + risk)
-    assert result.targets["target_2r"] == pytest.approx(result.entry_price + 2 * risk)
+    from app.breakout.target_ladder import MIN_TARGET_PCT
+
+    expected_1r = max(result.entry_price + risk, result.entry_price * (1 + MIN_TARGET_PCT["target_1r"]))
+    expected_2r = max(result.entry_price + 2 * risk, result.entry_price * (1 + MIN_TARGET_PCT["target_2r"]))
+    assert result.targets["target_1r"] == pytest.approx(expected_1r)
+    assert result.targets["target_2r"] == pytest.approx(expected_2r)
 
 
 def test_volume_confirmation_no_look_ahead(bars_factory):

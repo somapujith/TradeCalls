@@ -18,6 +18,7 @@ from app.breakout.atr_buffer import atr_entry_buffer
 from app.breakout.rvol import relative_volume
 from app.breakout.states import DipBuyState
 from app.market.candles import detect_reversal_pattern
+from app.breakout.target_ladder import target_ladder
 from app.market.levels import Level
 
 RETEST_TOLERANCE_PCT = 1.5
@@ -128,7 +129,7 @@ def advance_dip_buy_state(
         entry = atr_entry_buffer(close, atr, buffer_atr_multiple=0.05)
         dip_low = pullback_low if pullback_low is not None else float(bar_history["low"].tail(10).min())
         stop = dip_low  # stop below the dip's own low, not a wider structural stop — docs/engine.md
-        targets = _target_ladder(entry, stop, resistance_clusters or [])
+        targets = target_ladder(entry, stop, resistance_clusters or [])
         return EngineResult(
             new_state=DipBuyState.CONFIRMED,
             transition_event="CONFIRMED",

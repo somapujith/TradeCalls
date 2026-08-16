@@ -20,6 +20,7 @@ import pandas as pd
 from app.breakout.atr_buffer import atr_entry_buffer
 from app.breakout.rvol import relative_volume
 from app.breakout.states import BreakoutState
+from app.breakout.target_ladder import target_ladder
 from app.market.candles import candle_quality, upper_wick_pct
 from app.market.levels import Level
 
@@ -137,7 +138,7 @@ def advance_breakout_state(
         breakout_level = target.price if target else close
         entry = atr_entry_buffer(breakout_level, atr)
         stop = _pick_stop_loss(close, support_levels)
-        targets = _target_ladder(entry, stop, resistance_clusters)
+        targets = target_ladder(entry, stop, resistance_clusters)
         return EngineResult(
             new_state=BreakoutState.CONFIRMED,
             transition_event="CONFIRMED",
@@ -182,14 +183,3 @@ def _pick_stop_loss(close: float, support_levels: list[Level] | None) -> float:
     return close * 0.97
 
 
-def _target_ladder(entry: float, stop: float, resistance_clusters: list[Level]) -> dict:
-    risk = entry - stop
-    ladder = {
-        "target_1r": entry + 1.0 * risk,
-        "target_1_5r": entry + 1.5 * risk,
-        "target_2r": entry + 2.0 * risk,
-        "target_3r": entry + 3.0 * risk,
-    }
-    above = [c for c in resistance_clusters if c.price > entry]
-    ladder["nearest_structural_target"] = min(above, key=lambda c: c.price).price if above else None
-    return ladder

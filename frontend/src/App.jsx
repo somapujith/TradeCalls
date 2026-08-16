@@ -2,6 +2,7 @@ import { NavLink, Route, Routes } from 'react-router-dom'
 import CallsPage from './pages/CallsPage.jsx'
 import BacktestResultsPage from './pages/BacktestResultsPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
+import NewsPage from './pages/NewsPage.jsx'
 
 function NavBar() {
   const linkClass = ({ isActive }) =>
@@ -19,6 +20,9 @@ function NavBar() {
         <NavLink to="/backtests" className={linkClass}>
           Backtest Results
         </NavLink>
+        <NavLink to="/news" className={linkClass}>
+          News
+        </NavLink>
       </div>
     </nav>
   )
@@ -33,6 +37,7 @@ export default function App() {
           <Route path="/" element={<CallsPage />} />
           <Route path="/backtests" element={<BacktestResultsPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/news" element={<NewsPage />} />
         </Routes>
       </main>
     </div>
