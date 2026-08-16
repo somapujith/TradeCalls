@@ -1,15 +1,26 @@
 """RSS feed fallback source — general NSE-relevant financial news.
 
-Verified live as of 2026-08-16:
-  - Economic Times markets RSS: https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms
-    returns HTTP 200 with a well-formed RSS 2.0 feed (confirmed via direct
-    fetch — real, current article titles/links/pubDates observed).
-  - Moneycontrol's RSS (https://www.moneycontrol.com/rss/latestnews.xml)
-    returned HTTP 403 on every fetch attempt during verification, including
-    with a browser User-Agent — likely bot-blocked at the edge/CDN. NOT
-    wired in as a default feed for that reason; the feed list is
-    configurable via NEWS_RSS_FEED_URLS (comma-separated) in case a working
-    Moneycontrol (or other) feed URL is found later.
+Default feeds (config.py's news_rss_feed_urls), all verified live 2026-08-17
+(HTTP 200, real well-formed RSS 2.0 content on direct fetch):
+  - Economic Times markets: https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms
+  - LiveMint markets: https://www.livemint.com/rss/markets
+  - Business Standard markets: https://www.business-standard.com/rss/markets-106.rss
+  - The Hindu BusinessLine markets: https://www.thehindubusinessline.com/markets/feeder/default.rss
+
+Checked and excluded:
+  - Moneycontrol (https://www.moneycontrol.com/rss/latestnews.xml) — HTTP 403
+    on every attempt including with a browser User-Agent, bot-blocked at the
+    edge/CDN.
+  - NDTV Profit via feedburner (feeds.feedburner.com/ndtvprofit-latest) —
+    responded HTTP 200 on 2026-08-17 but feedburner is a deprecated Google
+    service prone to being pulled with no notice; not worth depending on for
+    a default. NEWS_RSS_FEED_URLS is user-configurable if you want it added.
+  - yfinance's news endpoint (Ticker.news) — bot-blocked same as its price
+    API (both broke 2026-08-17), not an RSS feed anyway so out of scope for
+    this module regardless.
+
+The feed list is fully configurable via NEWS_RSS_FEED_URLS
+(comma-separated) — add/remove without code changes.
 
 Uses only the standard library's xml.etree.ElementTree — no feedparser
 dependency needed for a plain RSS 2.0 <item> structure.

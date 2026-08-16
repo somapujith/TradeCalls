@@ -370,3 +370,82 @@ class TestRunBreakoutStateAdvance:
         monkeypatch.setattr("app.backtest.simulator.run_backtest_and_persist", _boom)
 
         scheduler_module.run_breakout_state_advance()  # must not raise
+
+
+# --- run_health_pinger ----------------------------------------------------
+
+
+class TestRunHealthPinger:
+    def test_pings_health_endpoint_at_configured_url(self, monkeypatch):
+        monkeypatch.setattr(scheduler_module.settings, "render_external_url", "https://tradecalls.onrender.com")
+
+        requested = {}
+
+        class _FakeResponse:
+            status_code = 200
+
+        def fake_get(url, timeout):
+            requested["url"] = url
+            requested["timeout"] = timeout
+            return _FakeResponse()
+
+        monkeypatch.setattr("requests.get", fake_get)
+
+        scheduler_module.run_health_pinger()
+
+        assert requested["url"] == "https://tradecalls.onrender.com/health"
+        assert requested["timeout"] == 10
+
+    def test_strips_trailing_slash_from_configured_url(self, monkeypatch):
+        monkeypatch.setattr(scheduler_module.settings, "render_external_url", "https://tradecalls.onrender.com/")
+
+        class _FakeResponse:
+            status_code = 200
+
+        requested = {}
+
+        def fake_get(url, timeout):
+            requested["url"] = url
+            return _FakeResponse()
+
+        monkeypatch.setattr("requests.get", fake_get)
+
+        scheduler_module.run_health_pinger()
+
+        assert requested["url"] == "https://tradecalls.onrender.com/health"
+
+    def test_request_exception_is_caught_and_does_not_raise(self, monkeypatch):
+        import requests
+
+        monkeypatch.setattr(scheduler_module.settings, "render_external_url", "https://tradecalls.onrender.com")
+
+        def fake_get(url, timeout):
+            raise requests.ConnectionError("network down")
+
+        monkeypatch.setattr("requests.get", fake_get)
+
+        scheduler_module.run_health_pinger()  # must not raise
+
+
+class TestStartSchedulerHealthPingerRegistration:
+    def test_health_pinger_job_registered_when_url_configured(self, monkeypatch):
+        monkeypatch.setattr(scheduler_module.settings, "render_external_url", "https://tradecalls.onrender.com")
+        monkeypatch.setattr(scheduler_module.scheduler, "start", lambda: None)
+
+        try:
+            scheduler_module.start_scheduler()
+            job = scheduler_module.scheduler.get_job("health_pinger")
+            assert job is not None
+        finally:
+            scheduler_module.scheduler.remove_all_jobs()
+
+    def test_health_pinger_job_not_registered_when_url_unset(self, monkeypatch):
+        monkeypatch.setattr(scheduler_module.settings, "render_external_url", "")
+        monkeypatch.setattr(scheduler_module.scheduler, "start", lambda: None)
+
+        try:
+            scheduler_module.start_scheduler()
+            job = scheduler_module.scheduler.get_job("health_pinger")
+            assert job is None
+        finally:
+            scheduler_module.scheduler.remove_all_jobs()

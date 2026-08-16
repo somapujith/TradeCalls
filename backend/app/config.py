@@ -69,8 +69,15 @@ class Settings(BaseSettings):
     news_cnbc_awaaz_base_url: str = "https://hindi.cnbctv18.com"
     news_cnbc_awaaz_section_path: str = "/share-market"
 
-    # RSS fallback scraper (see app/news/scraper_rss_fallback.py)
-    news_rss_feed_urls: str = "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"  # comma-separated
+    # RSS fallback scraper (see app/news/scraper_rss_fallback.py) — all four
+    # verified live (HTTP 200, real content) 2026-08-17. Moneycontrol still
+    # excluded (403/bot-blocked, per that module's docstring).
+    news_rss_feed_urls: str = (
+        "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms,"
+        "https://www.livemint.com/rss/markets,"
+        "https://www.business-standard.com/rss/markets-106.rss,"
+        "https://www.thehindubusinessline.com/markets/feeder/default.rss"
+    )  # comma-separated
 
 
 settings = Settings()
