@@ -22,6 +22,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 FRONTEND_DEV_ORIGIN = "http://localhost:5173"
+FRONTEND_PROD_ORIGIN = "https://trade-calls-lyart.vercel.app"
 
 
 @asynccontextmanager
@@ -46,7 +47,7 @@ app = FastAPI(title="TradeCalls API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_DEV_ORIGIN],
+    allow_origins=[FRONTEND_DEV_ORIGIN, FRONTEND_PROD_ORIGIN],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
