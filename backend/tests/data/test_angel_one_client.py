@@ -16,14 +16,19 @@ then _session.get_client()).
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from app.data import angel_one_client
 from app.data.angel_one_client import (
+    INTERVAL_FIVE_MINUTE,
+    INTERVAL_ONE_DAY,
     AngelOneNotConfiguredError,
     AngelOneRequestError,
     LtpQuote,
     _SessionHolder,
+    get_candle_data,
     get_ltp,
     get_ltp_safe,
 )
@@ -215,6 +220,108 @@ def test_session_holder_not_configured_without_any_credentials():
 
     with pytest.raises(AngelOneNotConfiguredError):
         holder.get_client()
+
+
+# --- get_candle_data ---
+
+
+def test_get_candle_data_raises_not_configured_error_without_credentials():
+    with pytest.raises(AngelOneNotConfiguredError):
+        get_candle_data("1594", INTERVAL_ONE_DAY, datetime(2026, 8, 1), datetime(2026, 8, 10))
+
+
+class _FakeSmartConnectClient:
+    def __init__(self, response):
+        self._response = response
+        self.last_params = None
+
+    def getCandleData(self, params):
+        self.last_params = params
+        return self._response
+
+
+def test_get_candle_data_parses_rows_into_dicts(monkeypatch):
+    fake_client = _FakeSmartConnectClient(
+        {
+            "status": True,
+            "message": "SUCCESS",
+            "data": [
+                ["2026-08-10T00:00:00+05:30", 1178.1, 1195.0, 1175.2, 1183.0, 9377001],
+                ["2026-08-11T00:00:00+05:30", 1188.0, 1193.5, 1182.0, 1190.7, 10160091],
+            ],
+        }
+    )
+    monkeypatch.setattr(angel_one_client._session, "get_client", lambda: fake_client)
+
+    result = get_candle_data("1594", INTERVAL_ONE_DAY, datetime(2026, 8, 10), datetime(2026, 8, 11))
+
+    assert result == [
+        {
+            "timestamp": "2026-08-10T00:00:00+05:30",
+            "open": 1178.1,
+            "high": 1195.0,
+            "low": 1175.2,
+            "close": 1183.0,
+            "volume": 9377001,
+        },
+        {
+            "timestamp": "2026-08-11T00:00:00+05:30",
+            "open": 1188.0,
+            "high": 1193.5,
+            "low": 1182.0,
+            "close": 1190.7,
+            "volume": 10160091,
+        },
+    ]
+
+
+def test_get_candle_data_builds_params_with_formatted_dates(monkeypatch):
+    fake_client = _FakeSmartConnectClient({"status": True, "message": "SUCCESS", "data": []})
+    monkeypatch.setattr(angel_one_client._session, "get_client", lambda: fake_client)
+
+    get_candle_data(
+        "17388",
+        INTERVAL_FIVE_MINUTE,
+        datetime(2026, 8, 10, 9, 15),
+        datetime(2026, 8, 10, 15, 30),
+        exchange="NSE",
+    )
+
+    assert fake_client.last_params == {
+        "exchange": "NSE",
+        "symboltoken": "17388",
+        "interval": INTERVAL_FIVE_MINUTE,
+        "fromdate": "2026-08-10 09:15",
+        "todate": "2026-08-10 15:30",
+    }
+
+
+def test_get_candle_data_empty_result_is_not_an_error(monkeypatch):
+    fake_client = _FakeSmartConnectClient({"status": True, "message": "SUCCESS", "data": []})
+    monkeypatch.setattr(angel_one_client._session, "get_client", lambda: fake_client)
+
+    result = get_candle_data("1594", INTERVAL_FIVE_MINUTE, datetime(2026, 8, 15), datetime(2026, 8, 16))
+
+    assert result == []
+
+
+def test_get_candle_data_raises_request_error_on_status_false(monkeypatch):
+    fake_client = _FakeSmartConnectClient({"status": False, "message": "Invalid Token"})
+    monkeypatch.setattr(angel_one_client._session, "get_client", lambda: fake_client)
+
+    with pytest.raises(AngelOneRequestError, match="Invalid Token"):
+        get_candle_data("bad-token", INTERVAL_ONE_DAY, datetime(2026, 8, 1), datetime(2026, 8, 2))
+
+
+def test_get_candle_data_wraps_unexpected_exception(monkeypatch):
+    class _BoomClient:
+        def getCandleData(self, params):
+            raise RuntimeError("network blip")
+
+    monkeypatch.setattr(angel_one_client._session, "get_client", lambda: _BoomClient())
+
+    with pytest.raises(AngelOneRequestError, match="network blip"):
+        get_candle_data("1594", INTERVAL_ONE_DAY, datetime(2026, 8, 1), datetime(2026, 8, 2))
 
 
 def test_session_holder_configured_check_requires_all_four_fields(monkeypatch):

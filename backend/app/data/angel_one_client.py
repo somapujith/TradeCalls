@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.config import settings
 
@@ -161,6 +162,80 @@ def get_ltp(symbol: str, exchange: str = DEFAULT_EXCHANGE, symbol_token: str | N
     quote = LtpQuote(price=price, timestamp=now)
     _LTP_CACHE[symbol] = quote
     return {"price": quote.price, "timestamp": quote.timestamp}
+
+
+
+# Angel One's documented interval strings for getCandleData (subset actually
+# exercised by this project so far — the SDK accepts others, e.g. ONE_MINUTE,
+# TEN_MINUTE, THIRTY_MINUTE; add here as they're used, don't pre-enumerate
+# the full set speculatively).
+INTERVAL_FIVE_MINUTE = "FIVE_MINUTE"
+INTERVAL_FIFTEEN_MINUTE = "FIFTEEN_MINUTE"
+INTERVAL_ONE_DAY = "ONE_DAY"
+
+
+def get_candle_data(
+    symbol_token: str,
+    interval: str,
+    from_date: datetime,
+    to_date: datetime,
+    exchange: str = DEFAULT_EXCHANGE,
+) -> list[dict]:
+    """Historical OHLCV candles via Angel One's getCandleData.
+
+    interval: an Angel One interval string (see the INTERVAL_* constants
+    above for the ones this project has verified work; SmartAPI supports
+    more). symbol_token: Angel One's numeric instrument token — same
+    requirement as get_ltp, no scrip-master lookup wired in yet, caller
+    must resolve it themselves.
+
+    Returns a list of {"timestamp": str (ISO8601, IST, as Angel One
+    returns it), "open": float, "high": float, "low": float, "close":
+    float, "volume": int}, oldest first, exactly as returned — no
+    gap-filling or resampling, matching this project's no-forward-fill
+    convention (see docs/db.md's Design notes). An empty result (e.g. the
+    date range covers no trading session) returns an empty list, not an
+    error.
+
+    Raises AngelOneNotConfiguredError or AngelOneRequestError, same as
+    get_ltp. Unlike get_ltp there is no cache here — a historical range is
+    call-specific, unlike a single current price, so callers doing
+    repeated pulls should cache upstream themselves.
+    """
+    client = _session.get_client()
+
+    params = {
+        "exchange": exchange,
+        "symboltoken": symbol_token,
+        "interval": interval,
+        "fromdate": from_date.strftime("%Y-%m-%d %H:%M"),
+        "todate": to_date.strftime("%Y-%m-%d %H:%M"),
+    }
+
+    try:
+        response = client.getCandleData(params)
+    except Exception as exc:
+        raise AngelOneRequestError(
+            f"Angel One candle fetch failed for token {symbol_token}: {exc}"
+        ) from exc
+
+    if not response.get("status"):
+        raise AngelOneRequestError(
+            f"Angel One candle fetch failed for token {symbol_token}: {response.get('message')}"
+        )
+
+    rows = response.get("data") or []
+    return [
+        {
+            "timestamp": row[0],
+            "open": float(row[1]),
+            "high": float(row[2]),
+            "low": float(row[3]),
+            "close": float(row[4]),
+            "volume": int(row[5]),
+        }
+        for row in rows
+    ]
 
 
 def get_ltp_safe(symbol: str, exchange: str = DEFAULT_EXCHANGE, symbol_token: str | None = None) -> dict | None:

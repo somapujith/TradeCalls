@@ -18,6 +18,9 @@ pytest==8.3.4
 pytest-cov==6.0.0
 python-dotenv==1.0.1
 alembic==1.13.3
+# starlette.testclient (used by tests/api) requires httpx at runtime — not
+# a FastAPI/starlette direct dependency, must be pinned separately.
+httpx==0.28.1
 
 # Angel One SmartAPI SDK — official PyPI package, free Trade API.
 # See app/data/angel_one_client.py. pyotp computes login TOTPs from the
@@ -26,6 +29,10 @@ alembic==1.13.3
 smartapi-python==1.5.5
 logzero==1.7.0
 pyotp==2.9.0
+# smartapi-python's SmartWebSocket imports this directly but doesn't list
+# it as its own dependency — must be pinned separately or `from SmartApi
+# import SmartConnect` fails at import time even for pure-REST usage.
+websocket-client==1.9.0
 
 # News collection module (app/news/) — free-tier APIs + HTML/RSS scraping, standalone (not wired into scoring)
 requests==2.34.2

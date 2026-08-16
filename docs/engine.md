@@ -20,18 +20,23 @@ v1 covers **two setup types**, not just breakout — see [Dip-Buy Setup](#dip-bu
 
 ## Live Data: Angel One
 
-Free broker API used for **current price display** in v1 (see [frontend.md](frontend.md)) and reserved as the foundation for live intraday scanning in a later version. Two distinct capabilities, intentionally not conflated:
+Free broker API used for **current price display** in v1 (see [frontend.md](frontend.md)) and, as of the `get_candle_data` addition below, verified capable of intraday historical candles too — moving intraday detection (VWAP/ORB/RVOL-by-time-bucket) from "needs a live tick feed" to "needs engine work against data already fetchable today." Three distinct capabilities, intentionally not conflated:
 
 | Capability | v1 usage | Data flow |
 |---|---|---|
 | REST quote (`ltpData`) | On-demand or polled (e.g. once per minute while dashboard is open) to show current price next to each open call | `data/angel_one_client.py` → dashboard, does **not** feed the breakout/dip-buy engines |
-| WebSocket live tick feed | Not used in v1 | Angel One likely offers a WebSocket feed alongside SmartAPI's REST quotes (unverified — not confirmed against a live account); if so, reserved for v-next live scanner — see [Future: Live Intraday Scanning](#future-live-intraday-scanning) |
+| Historical candles (`getCandleData`) | **Verified working** 2026-08-17 — daily and 5-minute intraday candles both returned real OHLCV for INFY (`ONE_DAY`: 20 bars over 30 days; `FIVE_MINUTE`: 292 bars over 6 trading days). Not yet wired into any engine — `get_candle_data` exists in `data/angel_one_client.py` but nothing calls it in the daily-bar breakout/dip-buy pipeline yet. | `data/angel_one_client.py` → available for a future intraday backtest/live slice, not wired in |
+| WebSocket live tick feed | Not used, not verified | Angel One likely offers a WebSocket feed alongside SmartAPI's REST quotes (unverified — not confirmed against a live account); reserved for a true streaming live scanner — see [Future: Live Intraday Scanning](#future-live-intraday-scanning) |
 
-This split matters: v1's breakout/dip-buy detection and backtesting stay entirely on yfinance daily bars — deterministic, already-designed, reproducible via `strategy_version`. Angel One's LTP is a **display-only overlay** in v1 — it shows what the price is doing right now next to a call that was generated from yesterday's close, it does not change the call itself. Wiring live ticks into the detection engines is new work (see Future section) and should not be assumed to work simply because the data is now available for free.
+This split matters: v1's breakout/dip-buy detection and backtesting stay entirely on yfinance daily bars — deterministic, already-designed, reproducible via `strategy_version`. Angel One's LTP is a **display-only overlay** in v1 — it shows what the price is doing right now next to a call that was generated from yesterday's close, it does not change the call itself. `get_candle_data` existing and working does not itself change the v1 pipeline either — wiring intraday candles into the breakout/dip-buy state machines (VWAP, ORB, RVOL-by-time-bucket) is still new, undesigned engine work, now unblocked on the data side but not started.
 
-`data/angel_one_client.py` module: wraps `smartapi-python`'s `SmartConnect`, handles login/session (two-factor: MPIN + TOTP, see Zero-Budget Constraint above), exposes `get_ltp(symbol, exchange, symbol_token) -> {price, timestamp}`. Credentials (`angel_one_api_key`/`angel_one_client_code`/`angel_one_mpin`/`angel_one_totp_secret`) go in `config.py` per [backend.md](backend.md), never hardcoded.
+`data/angel_one_client.py` module: wraps `smartapi-python`'s `SmartConnect`, handles login/session (two-factor: MPIN + TOTP, see Zero-Budget Constraint above), exposes:
+- `get_ltp(symbol, exchange, symbol_token) -> {price, timestamp}` — cached, display-only.
+- `get_candle_data(symbol_token, interval, from_date, to_date, exchange) -> list[{timestamp, open, high, low, close, volume}]` — historical OHLCV, uncached (caller's responsibility), `interval` one of the `INTERVAL_*` constants (`ONE_DAY`, `FIVE_MINUTE`, `FIFTEEN_MINUTE` verified so far).
 
-**Known v1 limitation**: Angel One's `ltpData` call is keyed by exchange + a numeric `symboltoken`, not a bare NSE ticker — there is no scrip-master lookup wired in yet to resolve a symbol like `RELIANCE` to its Angel One instrument token. `get_ltp` therefore requires the caller to supply `symbol_token` explicitly and raises `AngelOneRequestError` if it's omitted, rather than guessing (a wrong token would silently quote the wrong instrument). Building a lookup against Angel One's published scrip master JSON is future work, not yet done.
+Credentials (`angel_one_api_key`/`angel_one_client_code`/`angel_one_mpin`/`angel_one_totp_secret`) go in `config.py` per [backend.md](backend.md), never hardcoded.
+
+**Known v1 limitation**: both `ltpData` and `getCandleData` are keyed by exchange + a numeric `symboltoken`, not a bare NSE ticker — there is no scrip-master lookup wired in yet to resolve a symbol like `RELIANCE` to its Angel One instrument token. Both functions require the caller to supply `symbol_token` explicitly (`get_ltp` raises `AngelOneRequestError` if it's omitted; `get_candle_data` has no such guard yet since it has no cache path to fall through from — passing a wrong token silently fetches the wrong instrument's candles). Building a lookup against Angel One's published scrip master JSON (`https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json`, confirmed fetchable, ~155k instruments, no auth needed) is future work, not yet done.
 
 ## Modules
 
