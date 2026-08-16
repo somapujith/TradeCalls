@@ -111,19 +111,18 @@ def test_rsi_flat_price_series_is_neutral_when_no_moves(flat_bars_factory):
     assert pd.isna(result["rsi"].iloc[-1])
 
 
-def test_rsi_all_up_moves_is_nan_due_to_zero_avg_loss(bars_factory):
-    """With every bar an up-move, avg_loss is exactly 0, so rs = avg_gain /
-    NA (per the module's replace(0, pd.NA) zero-division guard) is NA, and
-    the final 100 - 100/(1+NA) is NaN rather than saturating at 100. This
-    pins down the actual (somewhat surprising) current behavior rather than
-    assuming the "intuitive" answer of 100.
-    """
+def test_rsi_all_up_moves_saturates_at_100(bars_factory):
+    """With every bar an up-move, avg_loss is exactly 0 and avg_gain > 0 —
+    RSI is 100 by convention (a pure uptrend is the maximally overbought
+    reading), not undefined. Previously this produced NaN (division by a
+    zero-turned-NA avg_loss went uncaught) — fixed since a NaN here
+    silently dropped a legitimate "very strong" signal from scoring."""
     rows = [{"open": 100 + i, "high": 100 + i, "low": 100 + i, "close": 100 + i, "volume": 1000} for i in range(30)]
     bars = bars_factory(rows, start=date(2024, 1, 1))
 
     result = compute_indicators(bars)
 
-    assert pd.isna(result["rsi"].iloc[-1])
+    assert result["rsi"].iloc[-1] == 100.0
 
 
 def test_rsi_bounded_between_0_and_100(bars_factory):

@@ -99,8 +99,16 @@ def _rsi(close: pd.Series, period: int) -> pd.Series:
     loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
     avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    # avg_loss == 0 with avg_gain > 0 (pure uptrend in the window, no down
+    # days) is RSI=100 by convention, not undefined — dividing by NaN
+    # previously produced NaN here instead, silently dropping a legitimate
+    # "very strong" reading. A fully flat window (avg_gain == avg_loss ==
+    # 0, no price movement at all) is a distinct case left as NaN, same as
+    # before — there's no "up" to be strong, so 100 would be wrong too.
     rs = avg_gain / avg_loss.replace(0, pd.NA)
-    return 100 - (100 / (1 + rs))
+    rsi = 100 - (100 / (1 + rs))
+    zero_loss_real_gain = (avg_loss == 0) & (avg_gain != 0)
+    return rsi.where(~zero_loss_real_gain, 100.0)
 
 
 def _atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int) -> pd.Series:
