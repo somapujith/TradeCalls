@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     # LTP cache TTL (seconds) — see docs/api.md GET /api/calls
     ltp_cache_ttl_seconds: int = 60
 
+    # Telegram bot alerts (docs/engine.md#telegram-alerts) — free, Bot API.
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
     # News collection module (app/news/ — free-tier only, docs/engine.md#zero-budget-constraint)
     # Not wired into scoring.py in v1 — standalone collector, see app/news/__init__.py.
     news_api_newsapi_key: str = ""  # newsapi.org free dev tier (100 req/day) — https://newsapi.org

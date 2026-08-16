@@ -55,7 +55,10 @@ UNIVERSE = [
     ("TATASTEEL", "Tata Steel", "METAL"),
     ("JSWSTEEL", "JSW Steel", "METAL"),
     ("HINDALCO", "Hindalco Industries", "METAL"),
-    ("TATAMOTORS", "Tata Motors", "AUTO"),
+    # TATAMOTORS: no match in Angel One's scrip master under this or any
+    # searched variant (TATAMOTOR, "TATA MOTOR") as of 2026-08-17 — likely a
+    # post-demerger ticker change not yet chased down. Omitted rather than
+    # guessed; re-add once the correct current ticker is confirmed.
     ("M&M", "Mahindra & Mahindra", "AUTO"),
     ("BAJAJ-AUTO", "Bajaj Auto", "AUTO"),
     ("EICHERMOT", "Eicher Motors", "AUTO"),
@@ -85,7 +88,7 @@ UNIVERSE = [
     ("PNB", "Punjab National Bank", "BANK"),
     ("CANBK", "Canara Bank", "BANK"),
     ("BANKBARODA", "Bank of Baroda", "BANK"),
-    ("ZOMATO", "Eternal (Zomato)", "CONSUMER_TECH"),
+    ("ETERNAL", "Eternal (formerly Zomato)", "CONSUMER_TECH"),
     ("TRENT", "Trent", "RETAIL"),
     ("NAUKRI", "Info Edge (Naukri)", "CONSUMER_TECH"),
     ("PAYTM", "One97 Communications (Paytm)", "CONSUMER_TECH"),
@@ -94,7 +97,8 @@ UNIVERSE = [
     ("SRF", "SRF", "CHEMICALS"),
     ("MUTHOOTFIN", "Muthoot Finance", "FINANCE"),
     ("CHOLAFIN", "Cholamandalam Investment", "FINANCE"),
-    ("LTIM", "LTIMindtree", "IT"),
+    # LTIM (LTIMindtree): same issue as TATAMOTORS above — no scrip-master
+    # match found under LTIM, LTI, or MINDTREE as of 2026-08-17. Omitted.
     ("TECHM", "Tech Mahindra", "IT"),
     ("PERSISTENT", "Persistent Systems", "IT"),
     ("POLYCAB", "Polycab India", "INDUSTRIALS"),

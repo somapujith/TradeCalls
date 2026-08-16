@@ -215,11 +215,55 @@ def run_breakout_state_advance() -> None:
             "Breakout state advance job complete, %d symbols processed, strategy_version=%s",
             len(symbols), strategy_version,
         )
+
+        _send_alerts_for_todays_confirmed_setups(db, strategy_version=strategy_version, signal_date=end)
     except Exception:
         db.rollback()
         logger.exception("Breakout state advance job failed")
     finally:
         db.close()
+
+
+def _send_alerts_for_todays_confirmed_setups(db: Session, *, strategy_version: str, signal_date: date) -> None:
+    """Alerts only for setups signaled on `signal_date` (today's bar) from
+    this run's `strategy_version` — run_breakout_state_advance replays the
+    full STATE_ADVANCE_WINDOW_DAYS trailing window fresh every day (see its
+    docstring), so without this filter every historical setup in that
+    window would re-alert daily. signal_date + strategy_version together
+    isolate genuinely new signals.
+    """
+    from app.breakout.scoring import score_tier
+    from app.breakout.states import BreakoutState
+    from app.db.models import Stock, TradeSetup
+    from app.notifications.telegram import send_trade_setup_alert
+
+    todays_setups = db.scalars(
+        select(TradeSetup).where(
+            TradeSetup.strategy_version == strategy_version,
+            TradeSetup.signal_date == signal_date,
+            TradeSetup.state == BreakoutState.CONFIRMED,
+        )
+    ).all()
+
+    for setup in todays_setups:
+        stock = db.get(Stock, setup.stock_id)
+        if stock is None:
+            continue
+        sent = send_trade_setup_alert(
+            symbol=stock.symbol,
+            setup_type=setup.setup_type,
+            entry_price=float(setup.entry_price) if setup.entry_price is not None else None,
+            stop_loss=float(setup.stop_loss),
+            target_1r=float(setup.target_1r),
+            target_1_5r=float(setup.target_1_5r),
+            target_2r=float(setup.target_2r),
+            target_3r=float(setup.target_3r),
+            nearest_structural_target=float(setup.nearest_structural_target) if setup.nearest_structural_target is not None else None,
+            score=float(setup.score),
+            tier=score_tier(float(setup.score)),
+        )
+        if sent:
+            logger.info("Telegram alert sent for %s (%s, score=%.0f)", stock.symbol, setup.setup_type, float(setup.score))
 
 
 def start_scheduler() -> BackgroundScheduler:
