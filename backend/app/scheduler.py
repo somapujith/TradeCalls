@@ -235,6 +235,7 @@ def _send_alerts_for_todays_confirmed_setups(db: Session, *, strategy_version: s
     from app.breakout.scoring import score_tier
     from app.breakout.states import BreakoutState
     from app.db.models import Stock, TradeSetup
+    from app.news.event_caution import build_event_caution_index, event_caution_for_symbol
     from app.notifications.telegram import send_trade_setup_alert
 
     todays_setups = db.scalars(
@@ -244,6 +245,15 @@ def _send_alerts_for_todays_confirmed_setups(db: Session, *, strategy_version: s
             TradeSetup.state == BreakoutState.CONFIRMED,
         )
     ).all()
+
+    if not todays_setups:
+        return
+
+    try:
+        event_index = build_event_caution_index(db)
+    except Exception:
+        logger.exception("Event-caution news fetch failed — alerts will go out without caution flags")
+        event_index = {}
 
     for setup in todays_setups:
         stock = db.get(Stock, setup.stock_id)
@@ -261,9 +271,24 @@ def _send_alerts_for_todays_confirmed_setups(db: Session, *, strategy_version: s
             nearest_structural_target=float(setup.nearest_structural_target) if setup.nearest_structural_target is not None else None,
             score=float(setup.score),
             tier=score_tier(float(setup.score)),
+            event_caution=event_caution_for_symbol(stock.symbol, event_index),
         )
         if sent:
             logger.info("Telegram alert sent for %s (%s, score=%.0f)", stock.symbol, setup.setup_type, float(setup.score))
+
+
+def run_health_pinger() -> None:
+    """Self-pings /health so Render's free-tier web service doesn't spin
+    down from 15 min of inbound-traffic idleness. No-op without
+    render_external_url set (e.g. local dev)."""
+    import requests
+
+    url = settings.render_external_url.rstrip("/") + "/health"
+    try:
+        response = requests.get(url, timeout=10)
+        logger.info("Health pinger: %s -> %d", url, response.status_code)
+    except requests.RequestException:
+        logger.exception("Health pinger request failed for %s", url)
 
 
 def start_scheduler() -> BackgroundScheduler:
@@ -276,6 +301,24 @@ def start_scheduler() -> BackgroundScheduler:
         replace_existing=True,
         misfire_grace_time=3600,
     )
+
+    if settings.render_external_url:
+        scheduler.add_job(
+            run_health_pinger,
+            trigger="interval",
+            minutes=settings.health_pinger_interval_minutes,
+            id="health_pinger",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
+        logger.info(
+            "Health pinger scheduled: every %d min against %s",
+            settings.health_pinger_interval_minutes,
+            settings.render_external_url,
+        )
+    else:
+        logger.info("Health pinger disabled — render_external_url not set")
+
     scheduler.start()
     logger.info(
         "Scheduler started: EOD job chain at %02d:%02d %s",

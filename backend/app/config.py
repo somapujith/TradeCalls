@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     eod_ingestion_hour: int = 18
     eod_ingestion_minute: int = 0
 
+    # Self-ping keepalive (Render free tier spins down web services after
+    # 15 min idle — this job pings our own /health every 5 min to prevent
+    # that; no-op if render_external_url is unset, e.g. local dev).
+    render_external_url: str = ""
+    health_pinger_interval_minutes: int = 5
+
     # Data client
     yfinance_max_retries: int = 3
     yfinance_backoff_seconds: float = 2.0
