@@ -21,12 +21,13 @@ from app.market.candles import detect_reversal_pattern
 from app.breakout.target_ladder import target_ladder
 from app.market.levels import Level
 
-# Loosened 2026-08-17 alongside breakout_engine.py's thresholds — see that
-# file's comment for why (user's 20-50 calls/day volume preference).
+# Loosened 2026-08-17, then reverted same day — see breakout_engine.py's
+# matching comment for why (real backtest showed the loosened settings
+# produced a losing strategy, profit_factor 0.46).
 RETEST_TOLERANCE_PCT = 1.5
-RETEST_MAX_BARS = 15  # was 10
-MIN_RVOL_CONFIRM = 1.1  # was 1.3 — lower bar than breakout's 1.2, reversal off a pullback not a breakout surge
-SUPPORT_TOLERANCE_PCT = 3.0  # was 1.5
+RETEST_MAX_BARS = 10
+MIN_RVOL_CONFIRM = 1.3  # lower bar than breakout's 1.5 — reversal off a pullback, not a breakout surge
+SUPPORT_TOLERANCE_PCT = 1.5
 
 
 @dataclass(frozen=True)

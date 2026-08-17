@@ -294,10 +294,9 @@ def test_reversal_candle_rvol_confirmed_advances_to_volume_confirmation(bars_fac
 
 
 def test_reversal_candle_min_rvol_is_lower_than_breakout_engine(bars_factory):
-    # dip-buy's RVOL bar (1.1) is documented as lower than breakout's (1.2)
-    # — reversal off a pullback, not a breakout surge. (Both loosened from
-    # 1.3/1.5 on 2026-08-17, relative ordering preserved.)
-    assert MIN_RVOL_CONFIRM == 1.1
+    # dip-buy's RVOL bar (1.3) is documented as lower than breakout's (1.5)
+    # — reversal off a pullback, not a breakout surge.
+    assert MIN_RVOL_CONFIRM == 1.3
 
     rows = [_bar_row(95, 96, 94, 95) for _ in range(20)]
     rows.append(_bar_row(95, 96, 94, 95.5, volume=135_000))  # rvol == 1.35
