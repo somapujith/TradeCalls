@@ -17,8 +17,8 @@ class BacktestMetrics:
     total_trades: int
     win_rate: float | None
     profit_factor: float | None
-    avg_mfe: float | None
-    avg_mae: float | None
+    avg_mfe: float | None  # fractional return (0.05 = +5%), not raw rupees — see outcomes.py
+    avg_mae: float | None  # fractional return (-0.05 = -5%), not raw rupees — see outcomes.py
     avg_holding_days: float | None
     breakdown_by_score_bucket: dict = field(default_factory=dict)
     breakdown_by_sector: dict = field(default_factory=dict)

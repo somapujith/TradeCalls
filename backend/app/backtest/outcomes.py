@@ -2,6 +2,15 @@
 
 No maximum holding period / time-stop in v1 — a trade stays TRADE_ACTIVE
 until TARGET_HIT, INVALIDATED (stop-loss), or SESSION_END.
+
+MFE/MAE are fractional returns relative to entry_price (e.g. 0.05 = +5%),
+NOT raw rupee price differences. Found live 2026-08-17: raw-rupee MFE/MAE
+(and simulator.py's raw-rupee pnl) let whichever trades happened to be in
+high-priced stocks (a ₹30,000 stock's 10% move is ~₹3,000 raw, a ₹120
+stock's same 10% move is ~₹12) dominate every aggregate metric in
+metrics.py regardless of real trade quality — profit_factor readings that
+night were comparing apples to oranges across price levels. Normalizing
+here fixes it at the source.
 """
 from __future__ import annotations
 
@@ -49,8 +58,8 @@ def track_trade_outcome(
         high = float(bar["high"])
         low = float(bar["low"])
 
-        mfe = max(mfe, high - entry_price)
-        mae = min(mae, low - entry_price)
+        mfe = max(mfe, (high - entry_price) / entry_price)
+        mae = min(mae, (low - entry_price) / entry_price)
 
         if low <= stop_loss:
             exit_date = idx.date() if hasattr(idx, "date") else idx

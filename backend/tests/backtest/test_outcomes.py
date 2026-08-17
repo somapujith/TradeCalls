@@ -59,8 +59,8 @@ def test_mfe_mae_tracked_across_bars_before_exit():
 
     result = track_trade_outcome(ENTRY_DATE, ENTRY_PRICE, STOP_LOSS, TARGETS, bars)
 
-    assert result.mfe == pytest.approx(6.0)  # best high (106) - entry (100)
-    assert result.mae == pytest.approx(-5.0)  # worst low (95) - entry (100)
+    assert result.mfe == pytest.approx(0.06)  # (best high 106 - entry 100) / entry 100
+    assert result.mae == pytest.approx(-0.05)  # (worst low 95 - entry 100) / entry 100
     assert result.exit_reason == "SESSION_END"
 
 

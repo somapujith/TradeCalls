@@ -561,7 +561,12 @@ def _fill_and_track(
         buy_value = float(fill.fill_price)
         sell_value = float(outcome.exit_price)
         costs = trade_costs(buy_value, sell_value)
-        pnl = (sell_value - buy_value) - costs.total
+        # Fractional return (e.g. 0.05 = +5%), not raw rupee difference —
+        # see outcomes.py's module docstring for why. A ₹30,000 stock's
+        # raw rupee P&L otherwise dwarfs a ₹120 stock's at the same %
+        # move, distorting metrics.py's profit_factor toward whichever
+        # trades happened to be in expensive stocks.
+        pnl = ((sell_value - buy_value) - costs.total) / buy_value
 
     return {
         "entry_date": entry_date,
