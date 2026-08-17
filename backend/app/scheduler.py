@@ -193,33 +193,61 @@ def _run_backtest_and_persist_with_retry(db: Session, **kwargs):
     CHECKOUT time, not a connection that goes stale mid-use within a single
     already-checked-out session — it can't catch this.
 
-    Observed live 2026-08-17: two separate runs (600 and 250 symbols) both
-    failed at the exact same first INSERT with "SSL connection has been
-    closed unexpectedly" — confirming the connection was already dead
-    before the write phase began, not a duration-under-load issue.
+    Observed live 2026-08-17: five separate attempts (two standalone runs
+    plus three retries reusing the same broken session) all failed at the
+    exact same first INSERT with "SSL connection has been closed
+    unexpectedly". Isolating that one row and inserting it via a brand new
+    SessionLocal() succeeded immediately — proving the row's data was never
+    the problem, the session itself was dead and simply calling
+    db.rollback() on a dead session does not reliably resurrect it (despite
+    SQLAlchemy's pool_pre_ping and disconnect-invalidation machinery — this
+    codebase's actual observed behavior, not the theoretical guarantee).
 
-    Safe to retry whole: run_backtest_and_persist's docstring says the
-    caller owns the transaction, nothing commits until our own db.commit()
-    below, so a failed attempt's uncommitted adds are gone after rollback
-    and a retry starts clean.
+    Fix: each retry gets a genuinely NEW SessionLocal(), not the original
+    (possibly-broken) `db` passed in — only the first attempt uses the
+    caller's session. The caller's own `db` remains valid for whatever it
+    does before/after this call (e.g. run_breakout_state_advance's NIFTY
+    query and the alert-sending step afterward) since those are separate
+    reads that see this function's commit regardless of which connection
+    performed it.
     """
     from sqlalchemy.exc import OperationalError
 
     from app.backtest.simulator import run_backtest_and_persist
 
+    # Deliberately NOT `from app.db.session import SessionLocal` here — that
+    # would re-fetch the original, unpatched object and bypass tests'
+    # monkeypatch.setattr(scheduler_module, "SessionLocal", ...) (see
+    # tests/test_scheduler.py's db_session fixture). This module's own
+    # top-level `SessionLocal` (imported once, patched by tests) is what
+    # must be used, referenced here as the bare module-global name.
+
     last_error: OperationalError | None = None
-    for attempt in range(1, BACKTEST_PERSIST_MAX_RETRIES + 1):
-        try:
-            result = run_backtest_and_persist(db, **kwargs)
-            db.commit()
-            return result
-        except OperationalError as exc:
-            last_error = exc
-            db.rollback()
-            logger.warning(
-                "run_backtest_and_persist attempt %d/%d hit a DB connection error, retrying: %s",
-                attempt, BACKTEST_PERSIST_MAX_RETRIES, exc,
-            )
+    session = db
+    opened_fresh_session = False
+    try:
+        for attempt in range(1, BACKTEST_PERSIST_MAX_RETRIES + 1):
+            try:
+                result = run_backtest_and_persist(session, **kwargs)
+                session.commit()
+                return result
+            except OperationalError as exc:
+                last_error = exc
+                try:
+                    session.rollback()
+                except Exception:
+                    pass  # rollback on an already-dead connection can itself raise — ignore, we're discarding this session anyway
+                logger.warning(
+                    "run_backtest_and_persist attempt %d/%d hit a DB connection error, retrying with a fresh session: %s",
+                    attempt, BACKTEST_PERSIST_MAX_RETRIES, exc,
+                )
+                if opened_fresh_session:
+                    session.close()
+                session = SessionLocal()
+                opened_fresh_session = True
+    finally:
+        if opened_fresh_session:
+            session.close()
 
     raise last_error
 
