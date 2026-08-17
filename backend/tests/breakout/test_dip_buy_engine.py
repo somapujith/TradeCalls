@@ -358,6 +358,21 @@ def test_confirmed_stop_loss_equals_pullback_low_exactly_not_wider_structural_st
     assert result.stop_loss == 93.0  # exact equality — not derived from the 80.0 structural support
 
 
+def test_volume_confirmation_caps_stop_loss_when_pullback_low_is_too_far(flat_bars_factory):
+    """Same MAX_STOP_LOSS_PCT cap as breakout_engine — a pullback_low 40%+
+    below entry isn't a disciplined stop even though it's technically the
+    dip's own low."""
+    bars = flat_bars_factory(5, price=95.5)
+
+    result = advance_dip_buy_state(
+        DipBuyState.VOLUME_CONFIRMATION, bars, [], resistance_clusters=[RESISTANCE], atr=1.0, pullback_low=50.0
+    )
+
+    entry = result.entry_price
+    assert result.stop_loss == pytest.approx(entry * 0.9)
+    assert result.stop_loss > 50.0
+
+
 def test_volume_confirmation_falls_back_to_min_of_trailing_lows_without_pullback_low(bars_factory):
     rows = [_bar_row(95, 96, 94.0, 95.5) for _ in range(4)]
     rows.append(_bar_row(95, 96, 90.0, 95.5))  # lowest low in trailing window = 90.0

@@ -339,6 +339,39 @@ def test_volume_confirmation_falls_back_to_flat_stop_when_no_support(flat_bars_f
     assert result.stop_loss == pytest.approx(101.0 * 0.97)
 
 
+def test_volume_confirmation_caps_stop_loss_when_structural_support_is_too_far(flat_bars_factory):
+    """A support level 50%+ below entry (e.g. an old base from before a big
+    rally) is technically "the nearest structural support" but not a
+    disciplined risk-management stop — capped at MAX_STOP_LOSS_PCT (10%)
+    below entry instead. Found live 2026-08-17: uncapped stops as far as
+    43% below entry were the real cause of a sub-1.0 profit factor despite
+    a 62.5% win rate."""
+    bars = flat_bars_factory(5, price=101.0)
+    far_support = Level(level_type="SWING_LOW", price=50.0, strength=1.0)
+
+    result = advance_breakout_state(
+        BreakoutState.VOLUME_CONFIRMATION, bars, [RESISTANCE], support_levels=[far_support], atr=2.0
+    )
+
+    # cap is close * 0.9, not entry * 0.9 — _pick_stop_loss caps relative to
+    # today's close, the same reference point the structural-support search
+    # itself uses, not the (slightly different) ATR-buffered entry price.
+    assert result.stop_loss == pytest.approx(101.0 * 0.9)
+    assert result.stop_loss > 50.0  # the far support itself must not be used
+
+
+def test_volume_confirmation_uses_tight_structural_support_when_within_cap(flat_bars_factory):
+    """A structural support inside the cap is still preferred over the cap
+    itself — the cap only binds when the structural level is too far."""
+    bars = flat_bars_factory(5, price=101.0)
+
+    result = advance_breakout_state(
+        BreakoutState.VOLUME_CONFIRMATION, bars, [RESISTANCE], support_levels=[SUPPORT], atr=2.0
+    )
+
+    assert result.stop_loss == pytest.approx(95.0)  # SUPPORT.price, tighter than the 10% cap
+
+
 def test_volume_confirmation_target_ladder_includes_nearest_structural_target(flat_bars_factory):
     bars = flat_bars_factory(5, price=101.0)
     far_resistance = Level(level_type="RESISTANCE_CLUSTER", price=120.0, strength=2.0)

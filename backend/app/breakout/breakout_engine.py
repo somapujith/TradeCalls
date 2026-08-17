@@ -181,15 +181,32 @@ def advance_breakout_state(
     return EngineResult(new_state=current_state, transition_event=None)
 
 
+MAX_STOP_LOSS_PCT = 10.0  # cap risk at 10% below entry — see docstring below
+
+
 def _pick_stop_loss(close: float, support_levels: list[Level] | None) -> float:
     """Nearest structural support below entry — swing low / resistance-turned-
     support / consolidation low, per docs/engine.md. Falls back to a flat 3%
     stop if no structural level is available yet (thin early history).
+
+    Capped at MAX_STOP_LOSS_PCT below entry. A stock that's rallied hard
+    since its last structural support formed can have that support sitting
+    30-40%+ below current price — technically "the nearest support," but
+    not a disciplined risk-management stop, it's an unbounded bet. Found
+    live 2026-08-17: uncapped structural stops as far as 43% below entry
+    were the actual cause of a sub-1.0 profit factor despite a 62.5% win
+    rate on a real liquid-universe backtest — average loss per trade was
+    being dragged up by a handful of enormous-risk trades, not a bad win
+    rate. Whichever of (structural support, the cap) is CLOSER to entry
+    wins — a tight structural stop is still preferred when one exists.
     """
+    candidate = close * 0.97
     if support_levels:
         below = [lvl for lvl in support_levels if lvl.price < close]
         if below:
-            return max(below, key=lambda lvl: lvl.price).price
-    return close * 0.97
+            candidate = max(below, key=lambda lvl: lvl.price).price
+
+    max_risk_floor = close * (1 - MAX_STOP_LOSS_PCT / 100)
+    return max(candidate, max_risk_floor)
 
 
