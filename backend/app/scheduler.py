@@ -181,6 +181,47 @@ def run_derived_data_refresh() -> None:
 
 STATE_ADVANCE_WINDOW_DAYS = 120  # enough trailing history for EMA50/retest-window bars_since_confirmed to be meaningful
 NIFTY_SYMBOL = "^NSEI"
+BACKTEST_PERSIST_MAX_RETRIES = 3
+
+
+def _run_backtest_and_persist_with_retry(db: Session, **kwargs):
+    """run_backtest_and_persist does all its compute (the full state-machine
+    replay) BEFORE any DB writes — for a large universe/window that compute
+    phase can run long enough that the already-checked-out connection goes
+    idle and gets killed by Neon's serverless proxy before the write phase
+    starts. pool_pre_ping (db/session.py) only guards connections at POOL
+    CHECKOUT time, not a connection that goes stale mid-use within a single
+    already-checked-out session — it can't catch this.
+
+    Observed live 2026-08-17: two separate runs (600 and 250 symbols) both
+    failed at the exact same first INSERT with "SSL connection has been
+    closed unexpectedly" — confirming the connection was already dead
+    before the write phase began, not a duration-under-load issue.
+
+    Safe to retry whole: run_backtest_and_persist's docstring says the
+    caller owns the transaction, nothing commits until our own db.commit()
+    below, so a failed attempt's uncommitted adds are gone after rollback
+    and a retry starts clean.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    from app.backtest.simulator import run_backtest_and_persist
+
+    last_error: OperationalError | None = None
+    for attempt in range(1, BACKTEST_PERSIST_MAX_RETRIES + 1):
+        try:
+            result = run_backtest_and_persist(db, **kwargs)
+            db.commit()
+            return result
+        except OperationalError as exc:
+            last_error = exc
+            db.rollback()
+            logger.warning(
+                "run_backtest_and_persist attempt %d/%d hit a DB connection error, retrying: %s",
+                attempt, BACKTEST_PERSIST_MAX_RETRIES, exc,
+            )
+
+    raise last_error
 
 
 def run_breakout_state_advance() -> None:
@@ -197,7 +238,6 @@ def run_breakout_state_advance() -> None:
     """
     logger.info("Breakout state advance job starting")
     from app.api.deps import generate_strategy_version
-    from app.backtest.simulator import run_backtest_and_persist
     from app.data.angel_one_ohlcv import fetch_daily_ohlcv
     from app.data.yfinance_client import upsert_daily_ohlcv
     from app.db.models import Stock
@@ -228,14 +268,13 @@ def run_breakout_state_advance() -> None:
             return
 
         strategy_version = generate_strategy_version()
-        run_backtest_and_persist(
+        _run_backtest_and_persist_with_retry(
             db,
             strategy_version=strategy_version,
             start_date=start,
             end_date=end,
             symbols=symbols,
         )
-        db.commit()
         logger.info(
             "Breakout state advance job complete, %d symbols processed, strategy_version=%s",
             len(symbols), strategy_version,

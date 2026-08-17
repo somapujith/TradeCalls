@@ -372,6 +372,74 @@ class TestRunBreakoutStateAdvance:
         scheduler_module.run_breakout_state_advance()  # must not raise
 
 
+# --- _run_backtest_and_persist_with_retry ----------------------------------
+
+
+class TestRunBacktestAndPersistWithRetry:
+    def test_succeeds_first_try_commits_once(self, db_session, monkeypatch):
+        calls = {"n": 0, "commits": 0}
+
+        def _fake(session, **kwargs):
+            calls["n"] += 1
+            return pd.DataFrame()
+
+        monkeypatch.setattr("app.backtest.simulator.run_backtest_and_persist", _fake)
+        real_commit = db_session.commit
+        monkeypatch.setattr(db_session, "commit", lambda: (calls.__setitem__("commits", calls["commits"] + 1), real_commit())[1])
+
+        scheduler_module._run_backtest_and_persist_with_retry(db_session, strategy_version="v", start_date=date(2026, 1, 1), end_date=date(2026, 1, 2), symbols=["AAA"])
+
+        assert calls["n"] == 1
+        assert calls["commits"] == 1
+
+    def test_retries_on_operational_error_then_succeeds(self, db_session, monkeypatch):
+        from sqlalchemy.exc import OperationalError
+
+        attempts = {"n": 0}
+
+        def _flaky(session, **kwargs):
+            attempts["n"] += 1
+            if attempts["n"] < 2:
+                raise OperationalError("stmt", {}, Exception("SSL connection has been closed unexpectedly"))
+            return pd.DataFrame()
+
+        monkeypatch.setattr("app.backtest.simulator.run_backtest_and_persist", _flaky)
+
+        scheduler_module._run_backtest_and_persist_with_retry(db_session, strategy_version="v", start_date=date(2026, 1, 1), end_date=date(2026, 1, 2), symbols=["AAA"])
+
+        assert attempts["n"] == 2
+
+    def test_raises_after_max_retries_exhausted(self, db_session, monkeypatch):
+        from sqlalchemy.exc import OperationalError
+
+        attempts = {"n": 0}
+
+        def _always_fails(session, **kwargs):
+            attempts["n"] += 1
+            raise OperationalError("stmt", {}, Exception("connection reset"))
+
+        monkeypatch.setattr("app.backtest.simulator.run_backtest_and_persist", _always_fails)
+
+        with pytest.raises(OperationalError):
+            scheduler_module._run_backtest_and_persist_with_retry(db_session, strategy_version="v", start_date=date(2026, 1, 1), end_date=date(2026, 1, 2), symbols=["AAA"])
+
+        assert attempts["n"] == scheduler_module.BACKTEST_PERSIST_MAX_RETRIES
+
+    def test_non_operational_error_is_not_retried(self, db_session, monkeypatch):
+        attempts = {"n": 0}
+
+        def _boom(session, **kwargs):
+            attempts["n"] += 1
+            raise RuntimeError("not a connection issue")
+
+        monkeypatch.setattr("app.backtest.simulator.run_backtest_and_persist", _boom)
+
+        with pytest.raises(RuntimeError):
+            scheduler_module._run_backtest_and_persist_with_retry(db_session, strategy_version="v", start_date=date(2026, 1, 1), end_date=date(2026, 1, 2), symbols=["AAA"])
+
+        assert attempts["n"] == 1
+
+
 # --- run_health_pinger ----------------------------------------------------
 
 
