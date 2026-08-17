@@ -1036,7 +1036,11 @@ class _FakeSession:
     ["entity"], stable across .where() clauses) rather than talking to a
     real database. Only implements the subset of the Session API
     run_backtest_and_persist actually calls: scalars().all(), scalar(),
-    add(), and flush() (no-op).
+    add(), flush() (no-op), and close() (no-op — this fake never holds a
+    real connection, so run_backtest_and_persist's mid-function
+    session.close() between the read and write phases, added to release
+    the connection during the long pure-compute run_backtest() call, is
+    a harmless no-op here).
     """
 
     def __init__(self, stocks, daily_bars_by_stock_id):
@@ -1074,6 +1078,9 @@ class _FakeSession:
         self.added.append(obj)
 
     def flush(self):
+        pass
+
+    def close(self):
         pass
 
 

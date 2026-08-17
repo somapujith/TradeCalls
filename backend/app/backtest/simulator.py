@@ -643,6 +643,23 @@ def run_backtest_and_persist(
     nifty_close = _load_bars_df(session, nifty_stock.id)["close"] if nifty_stock is not None else pd.Series(dtype=float)
 
     stock_meta = {symbol: {"sector": stock.sector} for symbol, stock in stock_by_symbol.items()}
+    # Extract the one scalar the write loop below actually needs (stock.id)
+    # into a plain dict BEFORE releasing the session — after session.close()
+    # these ORM objects are detached and any attribute access on them raises
+    # DetachedInstanceError rather than lazily reloading.
+    stock_id_by_symbol = {symbol: stock.id for symbol, stock in stock_by_symbol.items()}
+
+    # run_backtest() below is pure CPU-bound compute with zero DB usage —
+    # for a large universe (hundreds of symbols x years of daily bars) it
+    # can run long enough that holding this connection idle through it gets
+    # the connection killed by Neon's serverless proxy before the write
+    # phase even starts (observed live 2026-08-17, reproduced identically
+    # across multiple fresh sessions — pool_pre_ping alone doesn't help
+    # here since it only re-validates at pool CHECKOUT, and the connection
+    # was still "checked out" the whole idle stretch). Closing here releases
+    # it back to the pool; the write loop below re-acquires on first use,
+    # which IS a genuine new checkout and gets pool_pre_ping's protection.
+    session.close()
 
     trades = run_backtest(
         bars_by_symbol=bars_by_symbol,
@@ -654,13 +671,13 @@ def run_backtest_and_persist(
     )
 
     for row in trades.to_dict(orient="records"):
-        stock = stock_by_symbol.get(row["symbol"])
-        if stock is None:
+        stock_id = stock_id_by_symbol.get(row["symbol"])
+        if stock_id is None:
             continue
 
         state = row["exit_reason"] if row["exit_reason"] else ("TRADE_ACTIVE" if row["entry_date"] else "CONFIRMED")
         setup = TradeSetup(
-            stock_id=stock.id,
+            stock_id=stock_id,
             setup_type=row["setup_type"],
             strategy_version=strategy_version,
             signal_date=row["signal_date"],
@@ -681,7 +698,7 @@ def run_backtest_and_persist(
 
         session.add(
             BreakoutEvent(
-                stock_id=stock.id,
+                stock_id=stock_id,
                 setup_type=row["setup_type"],
                 trade_date=row["signal_date"],
                 from_state=None,
